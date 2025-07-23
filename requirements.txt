@@ -1,10 +1,9 @@
-libgl1
 streamlit
-opencv-python
+opencv-python-headless
 numpy
-requests
-openai
-matplotlib
-python-dotenv
-pillow
 pytesseract
+Pillow
+matplotlib
+requests
+python-dotenv
+openai
