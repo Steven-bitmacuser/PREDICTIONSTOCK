@@ -1,2 +1,9 @@
 streamlit
-pandas
+opencv-python
+numpy
+requests
+openai
+matplotlib
+python-dotenv
+pillow
+pytesseract
