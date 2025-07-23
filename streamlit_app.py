@@ -47,16 +47,19 @@ except pytesseract.TesseractNotFoundError:
     )
     st.stop()
 except FileNotFoundError as e:
+    # FIX: Display exception 'e' safely using st.code()
     st.error(
-        f"❌ Pytesseract configuration error: {e}. The Tesseract executable path could not be determined. "
+        "❌ Pytesseract configuration error. The Tesseract executable path could not be determined. "
         "Please ensure Tesseract is installed and its path is correctly set."
     )
+    st.code(f"Error details: {e}")
     st.stop()
 except Exception as e:
+    # FIX: Display exception 'e' safely using st.code()
     st.error(
-        f"❌ An unexpected error occurred during Pytesseract configuration: {e}. "
-        "Please check your setup."
+        "❌ An unexpected error occurred during Pytesseract configuration. Please check your setup."
     )
+    st.code(f"Error details: {e}")
     st.stop()
 
 
@@ -248,7 +251,9 @@ def search_news(query, api_key, cse_id, num_results=5):
         return [item["link"] for item in results]
     except requests.exceptions.RequestException as e:
         logging.error(f"❌ Google Search Error: {e}")
-        st.error(f"Google Search Error: {e}. Please check your GOOGLE_API_KEY and GOOGLE_CSE_ID.")
+        # FIX: Display exception 'e' safely using st.code()
+        st.error("Google Search Error. Please check your GOOGLE_API_KEY and GOOGLE_CSE_ID.")
+        st.code(f"Error details: {e}")
         return []
 
 
@@ -282,14 +287,17 @@ def analyze_news(news_links, api_key, base_url):
         else:
             logging.warning("Could not find a JSON object in the AI response. Raw response:\n" + text)
             return {"overall_summary": "No overall summary available from AI.", "news_items": []}
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
         logging.error("Failed to decode JSON from AI response. Raw response:\n" + text)
         st.error("Failed to decode JSON from AI response. The response might not be valid JSON.")
+        st.code(f"Error details: {e}\n\nRaw response from AI:\n{text}")
         return {"overall_summary": "Failed to parse AI response as JSON.", "news_items": []}
     except Exception as e:
         logging.error(f"An unexpected error occurred during news analysis: {e}")
-        st.error(f"An unexpected error occurred during AI analysis: {e}")
-        return {"overall_summary": f"An error occurred during AI analysis: {e}", "news_items": []}
+        # FIX: Display exception 'e' safely using st.code()
+        st.error("An unexpected error occurred during AI analysis.")
+        st.code(f"Error details: {e}")
+        return {"overall_summary": f"An error occurred during AI analysis.", "news_items": []}
 
 
 # --- Main Streamlit Application Logic ---
@@ -326,9 +334,9 @@ def run_analysis_streamlit(uploaded_file, ticker):
             x_hist, y_hist = extract_price_curve(image)
             st.success(f"✅ Extracted {len(x_hist)} data points from the chart image.")
         except (FileNotFoundError, ValueError) as e:
-            # FIX: Display dynamic error messages safely to prevent JS regex errors.
-            st.error("❌ Failed to extract data from image. Error details:")
-            st.code(str(e), language=None)
+            # This was already correct, but ensuring consistency.
+            st.error("❌ Failed to extract data from image.")
+            st.code(f"Error details: {e}")
             return
 
     # --- 3. Make Initial Price Prediction ---
@@ -344,7 +352,6 @@ def run_analysis_streamlit(uploaded_file, ticker):
         if news_links:
             st.subheader("📰 Found News Articles:")
             for link in news_links:
-                # FIX: Create explicit, safe markdown links to avoid autolinking errors.
                 st.markdown(f"- [{link}]({link})")
 
             news_analysis_result = analyze_news(news_links, deepseek_api_key, deepseek_base_url)
@@ -354,7 +361,6 @@ def run_analysis_streamlit(uploaded_file, ticker):
             if news_items_list:
                 st.success("✅ News analysis complete.")
                 st.subheader("Overall News Summary:")
-                # FIX: Display AI-generated summary as plain text to prevent rendering errors.
                 st.text(overall_news_summary)
                 
                 st.subheader("Individual News Analysis Details:")
@@ -362,7 +368,6 @@ def run_analysis_streamlit(uploaded_file, ticker):
                     st.markdown(f"**News Item {i + 1}:**")
                     st.write(f"  **Sentiment:** {item.get('sentiment', 'N/A')}")
                     st.write(f"  **Importance:** {item.get('importance', 'N/A'):.2f}")
-                    # FIX: Display AI-generated explanation as plain text.
                     st.write("  **Explanation:**")
                     st.text(item.get('explanation', 'No explanation provided.'))
                 news_analysis = news_items_list
@@ -399,7 +404,6 @@ def run_analysis_streamlit(uploaded_file, ticker):
     st.subheader("Final Prediction Summary:")
     st.write(f"**Last historical price:** ${y_hist[-1]:.2f}")
     st.write(f"**Predicted price after 50 time steps:** ${y_future_adjusted[-1]:.2f}")
-    # FIX: Display the final summary safely as plain text.
     st.write("**Overall News Sentiment:**")
     st.text(overall_news_summary)
 
