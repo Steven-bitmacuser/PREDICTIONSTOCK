@@ -14,7 +14,7 @@ from PIL import Image
 import pytesseract
 
 # Set the Matplotlib backend explicitly to avoid IDE-specific issues
-matplotlib.use('TkAgg')
+matplotlib.use('Agg')
 
 # Basic configuration for logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
