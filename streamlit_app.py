@@ -51,15 +51,15 @@ except FileNotFoundError as e:
         "❌ Pytesseract configuration error. The Tesseract executable path could not be determined. "
         "Please ensure Tesseract is installed and its path is correctly set."
     )
-    # Changed st.code to st.text to avoid Markdown interpretation issues with error strings
-    st.text(f"Error details: {e}") 
+    # Escaped the error message using re.escape() to prevent frontend regex issues
+    st.text(f"Error details: {re.escape(str(e))}") 
     st.stop()
 except Exception as e:
     st.error(
         "❌ An unexpected error occurred during Pytesseract configuration. Please check your setup."
     )
-    # Changed st.code to st.text to avoid Markdown interpretation issues with error strings
-    st.text(f"Error details: {e}") 
+    # Escaped the error message using re.escape() to prevent frontend regex issues
+    st.text(f"Error details: {re.escape(str(e))}") 
     st.stop()
 
 
@@ -252,8 +252,8 @@ def search_news(query, api_key, cse_id, num_results=5):
     except requests.exceptions.RequestException as e:
         logging.error(f"❌ Google Search Error: {e}")
         st.error("Google Search Error. Please check your GOOGLE_API_KEY and GOOGLE_CSE_ID.")
-        # Changed st.code to st.text to avoid Markdown interpretation issues with error strings
-        st.text(f"Error details: {e}") 
+        # Escaped the error message using re.escape() to prevent frontend regex issues
+        st.text(f"Error details: {re.escape(str(e))}") 
         return []
 
 
@@ -290,14 +290,14 @@ def analyze_news(news_links, api_key, base_url):
     except json.JSONDecodeError as e:
         logging.error("Failed to decode JSON from AI response. Raw response:\n" + text)
         st.error("Failed to decode JSON from AI response. The response might not be valid JSON.")
-        # Changed st.code to st.text to avoid Markdown interpretation issues with error strings
-        st.text(f"Error details: {e}\n\nRaw response from AI:\n{text}")
+        # Escaped the error message using re.escape() to prevent frontend regex issues
+        st.text(f"Error details: {re.escape(str(e))}\n\nRaw response from AI:\n{re.escape(text)}")
         return {"overall_summary": "Failed to parse AI response as JSON.", "news_items": []}
     except Exception as e:
         logging.error(f"An unexpected error occurred during news analysis: {e}", exc_info=True)
         st.error("An unexpected error occurred during AI analysis.")
-        # Changed st.code to st.text to avoid Markdown interpretation issues with error strings
-        st.text(f"Error details: {e}")
+        # Escaped the error message using re.escape() to prevent frontend regex issues
+        st.text(f"Error details: {re.escape(str(e))}")
         return {"overall_summary": f"An error occurred during AI analysis.", "news_items": []}
 
 
@@ -411,8 +411,8 @@ def run_analysis_streamlit(uploaded_file, ticker):
         logging.error(f"A critical error occurred during the analysis workflow: {e}", exc_info=True)
         st.error("An unexpected error occurred during the analysis.")
         st.info("This can sometimes happen due to issues with image parsing, API responses, or other transient problems. Please try again with a different image or ticker.")
-        # Changed st.code to st.text to avoid Markdown interpretation issues with error strings
-        st.text(f"Raw Error details: {e}")
+        # Escaped the error message using re.escape() to prevent frontend regex issues
+        st.text(f"Raw Error details: {re.escape(str(e))}")
 
 
 # --- Streamlit App UI Layout ---
