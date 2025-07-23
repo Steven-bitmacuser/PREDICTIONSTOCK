@@ -393,7 +393,8 @@ def run_analysis_streamlit(uploaded_file, ticker):
             x_hist, y_hist = extract_price_curve(image)
             st.success(f"✅ Extracted {len(x_hist)} data points from the chart image.")
         except (FileNotFoundError, ValueError) as e:
-            st.error(f"❌ Failed to extract data from image: {e}")
+            # Render exception details as plain text to avoid markdown parsing issues
+            st.error(f"❌ Failed to extract data from image: {str(e)}") 
             return
 
     # --- 3. Make Initial Price Prediction ---
@@ -409,7 +410,8 @@ def run_analysis_streamlit(uploaded_file, ticker):
         if news_links:
             st.subheader("📰 Found News Articles:")
             for link in news_links:
-                st.write(f"- [{link}]({link})")
+                # Display news links as raw text to avoid potential autolinking regex issues
+                st.text(f"- {link}") 
 
             news_analysis_result = analyze_news(news_links, deepseek_api_key, deepseek_base_url)
 
@@ -419,13 +421,15 @@ def run_analysis_streamlit(uploaded_file, ticker):
             if news_items_list:
                 st.success("✅ News analysis complete.")
                 st.subheader("Overall News Summary:")
-                st.write(overall_news_summary)
+                # Display overall summary as plain text
+                st.text(overall_news_summary) 
                 st.subheader("Individual News Analysis Details:")
                 for i, item in enumerate(news_items_list):
                     st.markdown(f"**News Item {i + 1}:**")
                     st.write(f"  **Sentiment:** {item.get('sentiment', 'N/A')}")
                     st.write(f"  **Importance:** {item.get('importance', 'N/A'):.2f}")
-                    st.write(f"  **Explanation:** {item.get('explanation', 'No explanation provided.')}")
+                    # Display explanation as plain text to avoid markdown parsing issues
+                    st.text(f"  Explanation: {item.get('explanation', 'No explanation provided.')}") 
                 news_analysis = news_items_list
             else:
                 st.warning(
@@ -465,7 +469,8 @@ def run_analysis_streamlit(uploaded_file, ticker):
     st.subheader("Final Prediction Summary:")
     st.write(f"**Last historical price:** ${y_hist[-1]:.2f}")
     st.write(f"**Predicted price after 50 time steps:** ${y_future_adjusted[-1]:.2f}")
-    st.write(f"**Overall News Sentiment:** {overall_news_summary}")
+    # Display overall news summary as plain text
+    st.text(f"Overall News Sentiment: {overall_news_summary}")
 
 
 # --- Streamlit App Layout ---
@@ -499,12 +504,12 @@ st.sidebar.markdown("#### API Key Setup")
 st.sidebar.markdown(
     "Ensure you have a `.env` file in the same directory as this script with the following variables set, or configure them as Streamlit secrets:"
 )
-# Removed the problematic TESSERACT_CMD lines from the code block,
-# as they were likely causing the JavaScript regex error on mobile.
-# The explanation above this code block already covers TESSERACT_CMD.
 st.sidebar.code("""
 GOOGLE_API_KEY="your_google_api_key"
 GOOGLE_CSE_ID="your_google_custom_search_engine_id"
 DEEPSEEK_API_KEY="your_deepseek_api_key"
 DEEPSEEK_BASE_URL="https://api.deepseek.com"
+# TESSERACT_CMD is usually not needed if tesseract is installed via packages.txt
+# If you still encounter issues, you might explicitly set it to "/usr/bin/tesseract" for Linux
+# TESSERACT_CMD="/usr/bin/tesseract" 
 """)
