@@ -12,21 +12,52 @@ import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 from PIL import Image
 import pytesseract
+import shutil # Needed for shutil.which()
 
 # Set up logging for Streamlit
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 load_dotenv()  # Load environment variables from .env file
 
-# Configure pytesseract (adjust path as needed for your deployment environment)
-# On Windows, it might be something like: r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-# On macOS with homebrew: '/opt/homebrew/bin/tesseract'
-# For Docker/Linux environments, ensure tesseract is installed and in PATH or specify path
+# --- Configure pytesseract ---
 try:
-    pytesseract.pytesseract.tesseract_cmd = os.getenv("TESSERACT_CMD", "/opt/homebrew/bin/tesseract")
+    # Attempt to find tesseract in the system's PATH first
+    tesseract_path = shutil.which("tesseract")
+    if tesseract_path:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_path
+        logging.info(f"Pytesseract command set to: {tesseract_path}")
+    else:
+        # Fallback to a common Linux path if not found in PATH
+        # This is particularly relevant for Streamlit Cloud environments
+        pytesseract.pytesseract.tesseract_cmd = os.getenv("TESSERACT_CMD", "/usr/bin/tesseract")
+        logging.warning(f"Tesseract not found in system PATH. Attempting fallback to: {pytesseract.pytesseract.tesseract_cmd}")
+
+    # Verify if tesseract_cmd is set and tesseract is accessible
+    if not pytesseract.pytesseract.tesseract_cmd:
+        raise FileNotFoundError("Tesseract executable path not found or set.")
+    
+    # Optional: Verify Tesseract version to ensure it's callable.
+    # This can add a slight delay but confirms Tesseract is truly accessible.
+    pytesseract.get_tesseract_version() 
+
+except pytesseract.TesseractNotFoundError:
+    st.error(
+        "❌ Tesseract OCR engine not found! Please ensure Tesseract is installed on your system or configured "
+        "correctly in your environment variables/`packages.txt` for Streamlit Cloud deployment. "
+        "Refer to the Streamlit documentation for deploying apps with system dependencies."
+    )
+    st.stop()
+except FileNotFoundError as e:
+    st.error(
+        f"❌ Pytesseract configuration error: {e}. The Tesseract executable path could not be determined. "
+        "Please ensure Tesseract is installed and its path is correctly set."
+    )
+    st.stop()
 except Exception as e:
     st.error(
-        f"Pytesseract configuration error: {e}. Please ensure Tesseract is installed and its path is correctly set in your environment variables or directly in the script.")
-    st.stop()  # Stop the app if tesseract isn't configured
+        f"❌ An unexpected error occurred during Pytesseract configuration: {e}. "
+        "Please check your setup."
+    )
+    st.stop()
 
 
 # --- chart_extractor.py content (Enhanced for Maximum Data Points) ---
@@ -68,7 +99,7 @@ def extract_price_curve(image):
         inverted_left_roi = cv2.bitwise_not(gray_left_roi)
         _, ocr_thresh_left = cv2.threshold(inverted_left_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         ocr_data_left = pytesseract.image_to_data(ocr_thresh_left, output_type=pytesseract.Output.DICT,
-                                                  config='--psm 6')
+                                                   config='--psm 6')
         potential_y_axes_data.append((ocr_data_left, y_axis_roi_y_start, "left"))
 
     right_roi = image_cv[y_axis_roi_y_start:y_axis_roi_y_end, right_y_axis_roi_x_start:right_y_axis_roi_x_end]
@@ -77,7 +108,7 @@ def extract_price_curve(image):
         inverted_right_roi = cv2.bitwise_not(gray_right_roi)
         _, ocr_thresh_right = cv2.threshold(inverted_right_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         ocr_data_right = pytesseract.image_to_data(ocr_thresh_right, output_type=pytesseract.Output.DICT,
-                                                   config='--psm 6')
+                                                    config='--psm 6')
         potential_y_axes_data.append((ocr_data_right, y_axis_roi_y_start, "right"))
 
     y_axis_labels = []
@@ -337,12 +368,23 @@ def run_analysis_streamlit(uploaded_file, ticker):
         - `GOOGLE_CSE_ID`
         - `DEEPSEEK_API_KEY`
         - `DEEPSEEK_BASE_URL` (e.g., `https://api.deepseek.com`)
-        - `TESSERACT_CMD` (Optional, if tesseract is not in your system's PATH)
+        - `TESSERACT_CMD` (Optional, if tesseract is not in your system's PATH, though auto-detection is preferred)
         """)
         return
 
     # Convert uploaded file to PIL Image
     image = Image.open(uploaded_file)
+
+    # --- NEW: Image Resizing for Mobile Performance ---
+    # Define a maximum size for the image to prevent out-of-memory errors on mobile
+    # Adjust these values as needed. 1600x1600 is a good balance for most charts.
+    MAX_IMAGE_SIZE = (1600, 1600) 
+    
+    if image.width > MAX_IMAGE_SIZE[0] or image.height > MAX_IMAGE_SIZE[1]:
+        original_size = image.size
+        image.thumbnail(MAX_IMAGE_SIZE, Image.LANCZOS) # Resizes in place, preserving aspect ratio
+        st.info(f"🖼️ Resized image from {original_size[0]}x{original_size[1]} to {image.width}x{image.height} for performance.")
+
     st.image(image, caption="Uploaded Stock Chart", use_column_width=True)
 
     # --- 2. Extract Historical Data from Image ---
@@ -462,5 +504,7 @@ GOOGLE_API_KEY="your_google_api_key"
 GOOGLE_CSE_ID="your_google_custom_search_engine_id"
 DEEPSEEK_API_KEY="your_deepseek_api_key"
 DEEPSEEK_BASE_URL="https://api.deepseek.com"
-TESSERACT_CMD="/opt/home/bin/tesseract" # Optional, if tesseract is not in PATH
+# TESSERACT_CMD is usually not needed if tesseract is installed via packages.txt
+# If you still encounter issues, you might explicitly set it to "/usr/bin/tesseract" for Linux
+# TESSERACT_CMD="/usr/bin/tesseract" 
 """)
