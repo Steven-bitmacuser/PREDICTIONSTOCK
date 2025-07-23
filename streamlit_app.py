@@ -47,7 +47,6 @@ except pytesseract.TesseractNotFoundError:
     )
     st.stop()
 except FileNotFoundError as e:
-    # FIX: Display exception 'e' safely using st.code()
     st.error(
         "❌ Pytesseract configuration error. The Tesseract executable path could not be determined. "
         "Please ensure Tesseract is installed and its path is correctly set."
@@ -55,7 +54,6 @@ except FileNotFoundError as e:
     st.code(f"Error details: {e}")
     st.stop()
 except Exception as e:
-    # FIX: Display exception 'e' safely using st.code()
     st.error(
         "❌ An unexpected error occurred during Pytesseract configuration. Please check your setup."
     )
@@ -251,7 +249,6 @@ def search_news(query, api_key, cse_id, num_results=5):
         return [item["link"] for item in results]
     except requests.exceptions.RequestException as e:
         logging.error(f"❌ Google Search Error: {e}")
-        # FIX: Display exception 'e' safely using st.code()
         st.error("Google Search Error. Please check your GOOGLE_API_KEY and GOOGLE_CSE_ID.")
         st.code(f"Error details: {e}")
         return []
@@ -293,8 +290,7 @@ def analyze_news(news_links, api_key, base_url):
         st.code(f"Error details: {e}\n\nRaw response from AI:\n{text}")
         return {"overall_summary": "Failed to parse AI response as JSON.", "news_items": []}
     except Exception as e:
-        logging.error(f"An unexpected error occurred during news analysis: {e}")
-        # FIX: Display exception 'e' safely using st.code()
+        logging.error(f"An unexpected error occurred during news analysis: {e}", exc_info=True)
         st.error("An unexpected error occurred during AI analysis.")
         st.code(f"Error details: {e}")
         return {"overall_summary": f"An error occurred during AI analysis.", "news_items": []}
@@ -305,107 +301,112 @@ def run_analysis_streamlit(uploaded_file, ticker):
     """
     Runs the full stock analysis workflow for Streamlit.
     """
-    st.info(f"🔎 Starting full analysis for {ticker} using the uploaded image.")
+    # FIX: Add a global try-except block to catch ALL unhandled exceptions
+    # during the analysis and display them safely to prevent a frontend crash.
+    try:
+        st.info(f"🔎 Starting full analysis for {ticker} using the uploaded image.")
 
-    # --- 1. Load API Keys ---
-    google_api_key = os.getenv("GOOGLE_API_KEY")
-    google_cse_id = os.getenv("GOOGLE_CSE_ID")
-    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-    deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
+        # --- 1. Load API Keys ---
+        google_api_key = os.getenv("GOOGLE_API_KEY")
+        google_cse_id = os.getenv("GOOGLE_CSE_ID")
+        deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+        deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
 
-    if not all([google_api_key, google_cse_id, deepseek_api_key, deepseek_base_url]):
-        st.error("Missing one or more required environment variables. Please check your `.env` file or Streamlit secrets.")
-        return
-
-    image = Image.open(uploaded_file)
-
-    # --- Image Resizing for Mobile Performance ---
-    MAX_IMAGE_SIZE = (1600, 1600)
-    if image.width > MAX_IMAGE_SIZE[0] or image.height > MAX_IMAGE_SIZE[1]:
-        original_size = image.size
-        image.thumbnail(MAX_IMAGE_SIZE, Image.LANCZOS)
-        st.info(f"🖼️ Resized image from {original_size[0]}x{original_size[1]} to {image.width}x{image.height} for performance.")
-
-    st.image(image, caption="Uploaded Stock Chart", use_column_width=True)
-
-    # --- 2. Extract Historical Data from Image ---
-    with st.spinner("Extracting historical data from image..."):
-        try:
-            x_hist, y_hist = extract_price_curve(image)
-            st.success(f"✅ Extracted {len(x_hist)} data points from the chart image.")
-        except (FileNotFoundError, ValueError) as e:
-            # This was already correct, but ensuring consistency.
-            st.error("❌ Failed to extract data from image.")
-            st.code(f"Error details: {e}")
+        if not all([google_api_key, google_cse_id, deepseek_api_key, deepseek_base_url]):
+            st.error("Missing one or more required environment variables. Please check your `.env` file or Streamlit secrets.")
             return
 
-    # --- 3. Make Initial Price Prediction ---
-    with st.spinner("Generating initial price prediction..."):
-        x_future, y_future_raw = predict_future_prices(x_hist, y_hist, num_future=50)
-        st.success("✅ Generated initial future price prediction.")
+        image = Image.open(uploaded_file)
 
-    # --- 4. Get and Analyze News ---
-    news_analysis = []
-    overall_news_summary = "No news analysis performed."
-    with st.spinner("Searching and analyzing news... This may take a while."):
-        news_links = search_news(f"{ticker} stock news", google_api_key, google_cse_id)
-        if news_links:
-            st.subheader("📰 Found News Articles:")
-            for link in news_links:
-                st.markdown(f"- [{link}]({link})")
+        # --- Image Resizing for Mobile Performance ---
+        MAX_IMAGE_SIZE = (1600, 1600)
+        if image.width > MAX_IMAGE_SIZE[0] or image.height > MAX_IMAGE_SIZE[1]:
+            original_size = image.size
+            image.thumbnail(MAX_IMAGE_SIZE, Image.LANCZOS)
+            st.info(f"🖼️ Resized image from {original_size[0]}x{original_size[1]} to {image.width}x{image.height} for performance.")
 
-            news_analysis_result = analyze_news(news_links, deepseek_api_key, deepseek_base_url)
-            news_items_list = news_analysis_result.get('news_items', [])
-            overall_news_summary = news_analysis_result.get('overall_summary', 'No overall summary provided.')
+        st.image(image, caption="Uploaded Stock Chart", use_column_width=True)
 
-            if news_items_list:
-                st.success("✅ News analysis complete.")
-                st.subheader("Overall News Summary:")
-                st.text(overall_news_summary)
-                
-                st.subheader("Individual News Analysis Details:")
-                for i, item in enumerate(news_items_list):
-                    st.markdown(f"**News Item {i + 1}:**")
-                    st.write(f"  **Sentiment:** {item.get('sentiment', 'N/A')}")
-                    st.write(f"  **Importance:** {item.get('importance', 'N/A'):.2f}")
-                    st.write("  **Explanation:**")
-                    st.text(item.get('explanation', 'No explanation provided.'))
-                news_analysis = news_items_list
+        # --- 2. Extract Historical Data from Image ---
+        with st.spinner("Extracting historical data from image..."):
+            x_hist, y_hist = extract_price_curve(image)
+            st.success(f"✅ Extracted {len(x_hist)} data points from the chart image.")
+
+        # --- 3. Make Initial Price Prediction ---
+        with st.spinner("Generating initial price prediction..."):
+            x_future, y_future_raw = predict_future_prices(x_hist, y_hist, num_future=50)
+            st.success("✅ Generated initial future price prediction.")
+
+        # --- 4. Get and Analyze News ---
+        news_analysis = []
+        overall_news_summary = "No news analysis performed."
+        with st.spinner("Searching and analyzing news... This may take a while."):
+            news_links = search_news(f"{ticker} stock news", google_api_key, google_cse_id)
+            if news_links:
+                st.subheader("📰 Found News Articles:")
+                for link in news_links:
+                    st.markdown(f"- [{link}]({link})")
+
+                news_analysis_result = analyze_news(news_links, deepseek_api_key, deepseek_base_url)
+                news_items_list = news_analysis_result.get('news_items', [])
+                overall_news_summary = news_analysis_result.get('overall_summary', 'No overall summary provided.')
+
+                if news_items_list:
+                    st.success("✅ News analysis complete.")
+                    st.subheader("Overall News Summary:")
+                    st.text(overall_news_summary)
+                    
+                    st.subheader("Individual News Analysis Details:")
+                    for i, item in enumerate(news_items_list):
+                        st.markdown(f"**News Item {i + 1}:**")
+                        st.write(f"  **Sentiment:** {item.get('sentiment', 'N/A')}")
+                        st.write(f"  **Importance:** {item.get('importance', 'N/A'):.2f}")
+                        st.write("  **Explanation:**")
+                        st.text(item.get('explanation', 'No explanation provided.'))
+                    news_analysis = news_items_list
+                else:
+                    st.warning("News analysis returned no results. Prediction will not be adjusted by news.")
             else:
-                st.warning("News analysis returned no results. Prediction will not be adjusted by news.")
-        else:
-            st.warning("Could not find any news articles. Prediction will not be adjusted by news.")
+                st.warning("Could not find any news articles. Prediction will not be adjusted by news.")
 
-    # --- 5. Adjust Prediction with News Sentiment ---
-    with st.spinner("Adjusting prediction based on news sentiment..."):
-        y_future_adjusted = adjust_prediction_with_news(y_future_raw, news_analysis)
-        st.success("✅ Adjusted prediction based on news sentiment.")
+        # --- 5. Adjust Prediction with News Sentiment ---
+        with st.spinner("Adjusting prediction based on news sentiment..."):
+            y_future_adjusted = adjust_prediction_with_news(y_future_raw, news_analysis)
+            st.success("✅ Adjusted prediction based on news sentiment.")
 
-    # --- 6. Plot Results ---
-    st.subheader("📈 Stock Price Prediction Plot")
-    fig, ax = plt.subplots(figsize=(12, 7))
-    ax.plot(x_hist, y_hist, 'o-', label="Historical (from Image)", color='royalblue')
-    
-    last_hist_x, last_hist_y = x_hist[-1], y_hist[-1]
-    first_future_x, first_future_y = x_future[0], y_future_adjusted[0]
-    ax.plot([last_hist_x, first_future_x], [last_hist_y, first_future_y], '--', color='gray')
-    ax.plot(x_future, y_future_adjusted, 'x--', label="Prediction (Adjusted by News)", color='darkorange', markersize=8)
+        # --- 6. Plot Results ---
+        st.subheader("📈 Stock Price Prediction Plot")
+        fig, ax = plt.subplots(figsize=(12, 7))
+        ax.plot(x_hist, y_hist, 'o-', label="Historical (from Image)", color='royalblue')
+        
+        last_hist_x, last_hist_y = x_hist[-1], y_hist[-1]
+        first_future_x, first_future_y = x_future[0], y_future_adjusted[0]
+        ax.plot([last_hist_x, first_future_x], [last_hist_y, first_future_y], '--', color='gray')
+        ax.plot(x_future, y_future_adjusted, 'x--', label="Prediction (Adjusted by News)", color='darkorange', markersize=8)
 
-    ax.set_title(f"{ticker} Stock Price Prediction", fontsize=16)
-    ax.set_xlabel("Time Steps (Relative)", fontsize=12)
-    ax.set_ylabel("Simulated Price ($)", fontsize=12)
-    ax.legend()
-    ax.grid(True, which='both', linestyle='--', linewidth=0.5)
-    plt.tight_layout()
-    st.pyplot(fig)
+        ax.set_title(f"{ticker} Stock Price Prediction", fontsize=16)
+        ax.set_xlabel("Time Steps (Relative)", fontsize=12)
+        ax.set_ylabel("Simulated Price ($)", fontsize=12)
+        ax.legend()
+        ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+        plt.tight_layout()
+        st.pyplot(fig)
 
-    st.success("Analysis Complete!")
-    st.write("---")
-    st.subheader("Final Prediction Summary:")
-    st.write(f"**Last historical price:** ${y_hist[-1]:.2f}")
-    st.write(f"**Predicted price after 50 time steps:** ${y_future_adjusted[-1]:.2f}")
-    st.write("**Overall News Sentiment:**")
-    st.text(overall_news_summary)
+        st.success("Analysis Complete!")
+        st.write("---")
+        st.subheader("Final Prediction Summary:")
+        st.write(f"**Last historical price:** ${y_hist[-1]:.2f}")
+        st.write(f"**Predicted price after 50 time steps:** ${y_future_adjusted[-1]:.2f}")
+        st.write("**Overall News Sentiment:**")
+        st.text(overall_news_summary)
+
+    except Exception as e:
+        # This global exception handler is the final defense against frontend crashes.
+        # It catches any error from the entire workflow and displays it safely.
+        logging.error(f"A critical error occurred during the analysis workflow: {e}", exc_info=True)
+        st.error("An unexpected error occurred during the analysis.")
+        st.info("This can sometimes happen due to issues with image parsing, API responses, or other transient problems. Please try again with a different image or ticker.")
+        st.code(f"Error details: {e}")
 
 
 # --- Streamlit App UI Layout ---
