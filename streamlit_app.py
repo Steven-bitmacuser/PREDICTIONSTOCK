@@ -368,7 +368,7 @@ def run_analysis_streamlit(uploaded_file, ticker):
         - `GOOGLE_CSE_ID`
         - `DEEPSEEK_API_KEY`
         - `DEEPSEEK_BASE_URL` (e.g., `https://api.deepseek.com`)
-        - `TESSERACT_CMD` (Optional, if tesseract is not in your system's PATH, though auto-detection is preferred)
+        - `TESSERACT_CMD` (Optional, though auto-detection is preferred. If manual, use `/usr/bin/tesseract` for Linux.)
         """)
         return
 
@@ -499,12 +499,12 @@ st.sidebar.markdown("#### API Key Setup")
 st.sidebar.markdown(
     "Ensure you have a `.env` file in the same directory as this script with the following variables set, or configure them as Streamlit secrets:"
 )
+# Removed the problematic TESSERACT_CMD lines from the code block,
+# as they were likely causing the JavaScript regex error on mobile.
+# The explanation above this code block already covers TESSERACT_CMD.
 st.sidebar.code("""
 GOOGLE_API_KEY="your_google_api_key"
 GOOGLE_CSE_ID="your_google_custom_search_engine_id"
 DEEPSEEK_API_KEY="your_deepseek_api_key"
 DEEPSEEK_BASE_URL="https://api.deepseek.com"
-# TESSERACT_CMD is usually not needed if tesseract is installed via packages.txt
-# If you still encounter issues, you might explicitly set it to "/usr/bin/tesseract" for Linux
-# TESSERACT_CMD="/usr/bin/tesseract" 
 """)
