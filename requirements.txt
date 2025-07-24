@@ -14,3 +14,4 @@ python-dateutil
 beautifulsoup4
 google-api-python-client
 pytz
+tabulate
