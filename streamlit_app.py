@@ -20,6 +20,7 @@ from dateutil.relativedelta import relativedelta
 from bs4 import BeautifulSoup
 from googleapiclient.discovery import build
 import pytz
+import time # Import time for rate limiting
 
 # Set up logging for Streamlit
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -303,7 +304,7 @@ def search_news(query, api_key, cse_id, num_results=5):
     except requests.exceptions.RequestException as e:
         logging.error(f"❌ Google Search Error: {e}")
         st.error(f"Google Search Error: {e}. Please check your GOOGLE_API_KEY and GOOGLE_CSE_ID.")
-        return []
+    return []
 
 
 def analyze_news(news_links, api_key, base_url):
@@ -364,8 +365,9 @@ def run_analysis_streamlit(uploaded_file, ticker):
     google_cse_id = os.getenv("GOOGLE_CSE_ID")
     deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
     deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
+    alpha_vantage_api_key = os.getenv("ALPHA_VANTAGE_API_KEY") # New API key
 
-    if not all([google_api_key, google_cse_id, deepseek_api_key, deepseek_base_url]):
+    if not all([google_api_key, google_cse_id, deepseek_api_key, deepseek_base_url, alpha_vantage_api_key]):
         st.error(
             "Missing one or more required environment variables. Please check your `.env` file or Streamlit secrets.")
         st.markdown("""
@@ -374,6 +376,7 @@ def run_analysis_streamlit(uploaded_file, ticker):
         - `GOOGLE_CSE_ID`
         - `DEEPSEEK_API_KEY`
         - `DEEPSEEK_BASE_URL` (e.g., `https://api.deepseek.com`)
+        - `ALPHA_VANTAGE_API_KEY` (Get a free key from [https://www.alphavantage.co/support/#api-key](https://www.alphavantage.co/support/#api-key))
         - `TESSERACT_CMD` (Optional, if tesseract is not in your system's PATH, though auto-detection is preferred)
         """)
         return
@@ -480,16 +483,35 @@ def google_search_chatbot(query, api_key, cse_id, **kwargs):
 
 
 def browse_page(url):
+    """
+    Improved function to browse a webpage and extract relevant text content.
+    It attempts to remove common non-content elements and extract text from a broader
+    set of content-bearing HTML tags.
+    """
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-        for tag in soup(['script', 'style', 'nav', 'footer', 'header']):
+
+        # Remove common non-content tags that might contain irrelevant text or noise
+        for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'form', 'button', 'img', 'svg', 'aside', 'noscript', 'meta', 'link', 'input', 'select', 'textarea']):
             tag.decompose()
-        texts = [p.get_text(strip=True) for p in soup.find_all(['p', 'h1', 'h2', 'h3', 'li'])]
+
+        # Extract text from a comprehensive set of content-bearing HTML tags
+        # Prioritize tags that typically hold main article/body content
+        main_content_tags = soup.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'article', 'section', 'main', 'div', 'span'])
+        
+        # Filter out empty strings and join
+        texts = [tag.get_text(strip=True) for tag in main_content_tags if tag.get_text(strip=True)]
+
         content = ' '.join(texts)
-        return re.sub(r'\s+', ' ', content).strip()[:4000]
+        # Clean up multiple spaces and newlines
+        cleaned_content = re.sub(r'\s+', ' ', content).strip()
+
+        # Limit content length to avoid excessive token usage for the LLM
+        # A slightly larger limit might capture more context, adjust as needed based on LLM capabilities
+        return cleaned_content[:4000] # Kept at 4000 characters for consistency with previous behavior
     except requests.RequestException as e:
         print(f"❌ Browsing error: {e}")
         return None
@@ -524,78 +546,171 @@ def GoogleSearchAndBrowse(query, num_results=3): # Added num_results parameter
 
     return f"Search Results for '{query_with_time}':\n" + "\n\n".join(all_content)
 
+def getRealtimeStockData_AlphaVantage(ticker: str, api_key: str):
+    """
+    Fetches real-time stock data from Alpha Vantage.
+    Note: Free Alpha Vantage API has a rate limit of 5 calls per minute.
+    """
+    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={api_key}"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        if "Global Quote" in data and data["Global Quote"]:
+            quote = data["Global Quote"]
+            price = float(quote.get("05. price"))
+            open_price = float(quote.get("02. open"))
+            high_price = float(quote.get("03. high"))
+            low_price = float(quote.get("04. low"))
+            volume = int(quote.get("06. volume"))
+            latest_trading_day = quote.get("07. latest trading day")
+            
+            # Alpha Vantage does not provide exact real-time timestamp, using latest trading day
+            time_str = f"End of Day {latest_trading_day}" if latest_trading_day else "N/A"
+
+            return {
+                "price": price,
+                "open": open_price,
+                "high": high_price,
+                "low": low_price,
+                "volume": volume,
+                "time_str": time_str,
+                "source": "Alpha Vantage"
+            }
+        elif "Error Message" in data:
+            logging.error(f"Alpha Vantage Error for {ticker}: {data['Error Message']}")
+            return {"error": data['Error Message']}
+        elif "Note" in data:
+            logging.warning(f"Alpha Vantage Note for {ticker}: {data['Note']}")
+            return {"error": data['Note']}
+        else:
+            return {"error": "No 'Global Quote' data found in Alpha Vantage response."}
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"❌ Alpha Vantage API request error for {ticker}: {e}")
+        return {"error": f"Alpha Vantage API request failed: {e}"}
+    except ValueError as e:
+        logging.error(f"❌ Alpha Vantage data parsing error for {ticker}: {e}")
+        return {"error": f"Alpha Vantage data parsing failed: {e}"}
+    except Exception as e:
+        logging.error(f"❌ An unexpected error occurred with Alpha Vantage for {ticker}: {e}")
+        return {"error": f"An unexpected error occurred with Alpha Vantage: {e}"}
+
 
 def getRealtimeStockData(ticker: str):
     """
     Get real-time stock data for a ticker symbol.
-    This function will attempt to use YFinance first, and if data is unavailable or incomplete,
-    it will fall back to a Google Search to find the latest price.
+    This function will attempt to use YFinance first, then Alpha Vantage,
+    and finally fall back to a Google Search to find the latest price.
     """
+    company_name_map = {
+        "600519.SS": "Kweichow Moutai",
+        "NVDA": "NVIDIA Corporation",
+        # Add other common international tickers and their company names here if needed
+    }
+    company_name = company_name_map.get(ticker.upper(), ticker) # Default to ticker if name not found
+
+    # 1. Try YFinance
     try:
         stock = yf.Ticker(ticker)
         data = stock.info
-        if not data or data.get('regularMarketPrice') is None:
-            # If yfinance fails or price is not available, try Google Search as fallback
-            st.warning(f"⚠️ YFinance did not return complete real-time data for '{ticker}'. Attempting Google Search fallback.")
-            search_query = f"real-time stock price {ticker}"
-            # Request only 1 result for the specific price fallback
-            search_result_content = GoogleSearchAndBrowse(search_query, num_results=1)
+        if data and data.get('regularMarketPrice') is not None:
+            price = data.get('regularMarketPrice')
+            open_price = data.get('regularMarketOpen')
+            day_high = data.get('regularMarketDayHigh')
+            day_low = data.get('regularMarketLow')
+            volume = data.get('regularMarketVolume')
+            market_time_ts = data.get('regularMarketTime')
             
-            # Attempt to parse price from the search result content
-            price_match = re.search(r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{1,4})?)', search_result_content)
-            if price_match:
-                try:
-                    extracted_price = float(price_match.group(1).replace(',', ''))
-                    return (
-                        f"**Real-time data for {ticker.upper()} (via Google Search Fallback):**\n\n"
-                        f"**Current Price:** ${extracted_price:.2f}\n"
-                        f"**Source Content:** {search_result_content[:500]}..." # Show snippet of source
-                    )
-                except ValueError:
-                    pass # Fall through to returning raw search content if price parsing fails
-
-            return f"Could not retrieve real-time price for '{ticker}' from YFinance or Google Search. Search result: {search_result_content}"
-
-        price = data.get('regularMarketPrice')
-        open_price = data.get('regularMarketOpen')
-        day_high = data.get('regularMarketDayHigh')
-        day_low = data.get('regularMarketLow')
-        volume = data.get('regularMarketVolume')
-        market_time_ts = data.get('regularMarketTime')
-        
-        if market_time_ts:
-            dt = datetime.fromtimestamp(market_time_ts, pytz.utc).astimezone(pytz.timezone('America/New_York'))
-            time_str = dt.strftime("%Y-%m-%d %I:%M %p %Z")
+            if market_time_ts:
+                dt = datetime.fromtimestamp(market_time_ts, pytz.utc).astimezone(pytz.timezone('America/New_York'))
+                time_str = dt.strftime("%Y-%m-%d %I:%M %p %Z")
+            else:
+                time_str = "N/A"
+                
+            return (
+                f"**Real-time data for {ticker.upper()} (via YFinance):**\n\n"
+                f"**Current Price:** ${price:.2f}\n"
+                f"**Today's Range:** ${day_low:.2f} - ${day_high:.2f}\n"
+                f"**Opening Price:** ${open_price:.2f}\n"
+                f"**Trading Volume:** {volume:,} shares\n"
+                f"**Last Updated:** {time_str}"
+            )
         else:
-            time_str = "N/A"
-            
-        return (
-            f"**Real-time data for {ticker.upper()}:**\n\n"
-            f"**Current Price:** ${price:.2f}\n"
-            f"**Today's Range:** ${day_low:.2f} - ${day_high:.2f}\n"
-            f"**Opening Price:** ${open_price:.2f}\n"
-            f"**Trading Volume:** {volume:,} shares\n"
-            f"**Last Updated:** {time_str}"
-        )
+            st.warning(f"⚠️ YFinance did not return complete real-time data for '{ticker}'. Trying Alpha Vantage...")
     except Exception as e:
-        st.warning(f"⚠️ An error occurred fetching real-time data for {ticker} from YFinance: {e}. Attempting Google Search fallback.")
-        search_query = f"real-time stock price {ticker}"
-        # Request only 1 result for the specific price fallback
-        search_result_content = GoogleSearchAndBrowse(search_query, num_results=1)
+        st.warning(f"⚠️ An error occurred fetching real-time data for {ticker} from YFinance: {e}. Trying Alpha Vantage...")
+
+    # 2. Try Alpha Vantage
+    alpha_vantage_api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
+    if alpha_vantage_api_key:
+        av_data = getRealtimeStockData_AlphaVantage(ticker, alpha_vantage_api_key)
+        if av_data and "error" not in av_data:
+            return (
+                f"**Real-time data for {ticker.upper()} (via Alpha Vantage):**\n\n"
+                f"**Current Price:** ${av_data['price']:.2f}\n"
+                f"**Today's Range:** ${av_data['low']:.2f} - ${av_data['high']:.2f}\n"
+                f"**Opening Price:** ${av_data['open']:.2f}\n"
+                f"**Trading Volume:** {av_data['volume']:,} shares\n"
+                f"**Last Updated:** {av_data['time_str']}"
+            )
+        else:
+            st.warning(f"⚠️ Alpha Vantage did not return complete real-time data for '{ticker}' (Error: {av_data.get('error', 'Unknown')}). Trying Google Search fallback...")
+    else:
+        st.warning("⚠️ ALPHA_VANTAGE_API_KEY is not set. Skipping Alpha Vantage lookup.")
+
+    # 3. Fallback to Google Search
+    st.info(f"Attempting Google Search fallback for '{ticker}'...")
+    search_queries_to_try = [
+        f"real-time stock price {ticker}",
+        f"current stock price {company_name}",
+        f"{company_name} stock price today"
+    ]
+    
+    for query_attempt in search_queries_to_try:
+        search_result_content = GoogleSearchAndBrowse(query_attempt, num_results=1)
         
-        price_match = re.search(r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{1,4})?)', search_result_content)
+        # Check if content was retrieved and if it contains "No Google search results found" or "Could not retrieve content"
+        if "No Google search results found" in search_result_content or "Could not retrieve content" in search_result_content:
+            logging.info(f"Google Search for '{query_attempt}' failed to retrieve content. Trying next query.")
+            continue # Try the next query in the list
+
+        # More flexible regex to capture price with or without currency symbols, and commas/dots
+        # This regex tries to capture a number that looks like a price, potentially with thousands separators and decimal points.
+        # It also looks for common currency symbols or abbreviations.
+        price_match = re.search(r'[\$¥€£]?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?)\s*(?:USD|CNY|EUR|GBP|AUD|CAD|JPY|HKD|SGD)?', search_result_content, re.IGNORECASE)
+        
         if price_match:
             try:
-                extracted_price = float(price_match.group(1).replace(',', ''))
+                extracted_price_str = price_match.group(1)
+                # Handle cases like "1.234,56" (European format) vs "1,234.56" (US format)
+                if ',' in extracted_price_str and '.' in extracted_price_str:
+                    # If comma is the last separator, assume European decimal
+                    if extracted_price_str.rfind(',') > extracted_price_str.rfind('.'):
+                        extracted_price_str = extracted_price_str.replace('.', '').replace(',', '.')
+                    else: # Assume US thousands separator
+                        extracted_price_str = extracted_price_str.replace(',', '')
+                else: # Only commas or only dots, assume standard US format
+                    extracted_price_str = extracted_price_str.replace(',', '')
+
+                extracted_price = float(extracted_price_str)
                 return (
-                    f"**Real-time data for {ticker.upper()} (via Google Search Fallback):**\n\n"
+                    f"**Real-time data for {ticker.upper()} (via Google Search Fallback - Query: '{query_attempt}'):**\n\n"
                     f"**Current Price:** ${extracted_price:.2f}\n"
-                    f"**Source Content:** {search_result_content[:500]}..."
+                    f"**Source Content:** {search_result_content[:500]}..." # Show snippet of source
                 )
             except ValueError:
-                pass
-        
-        return f"Error fetching real-time data for {ticker}: {e}. Google Search fallback also failed to find a clear price. Search result: {search_result_content}"
+                logging.warning(f"Could not parse extracted price '{extracted_price_str}' from Google Search for '{query_attempt}'.")
+                # Continue to next query if parsing fails for this one
+                continue
+        else:
+            logging.info(f"No clear price found in Google Search results for '{query_attempt}'.")
+            # Continue to next query if no price match for this one
+            continue
+    
+    # If all fallbacks fail
+    return f"Could not retrieve real-time price for '{ticker}' from YFinance, Alpha Vantage, or Google Search after multiple attempts. Last search result: {search_result_content}"
 
 
 def getHistoricalStockData(ticker: str, period: str = "1mo"):
@@ -642,7 +757,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "getRealtimeStockData",
-            "description": "Get real-time stock data for a ticker symbol. This function will attempt to use YFinance first, and if data is unavailable or incomplete, it will fall back to a Google Search to find the latest price.",
+            "description": "Get real-time stock data for a ticker symbol. This function will attempt to use YFinance first, then Alpha Vantage, and finally fall back to a Google Search to find the latest price.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -870,7 +985,8 @@ To use this application, you need to set up the following environment variables 
 - `GOOGLE_API_KEY`: Your API key for Google Custom Search.
 - `GOOGLE_CSE_ID`: Your Custom Search Engine ID.
 - `DEEPSEEK_API_KEY`: Your API key for DeepSeek.
-- `DEEPSEEK_BASE_URL`: The base URL for the DeepSeek API (e.g., `https://api.deepseek.com`).
+- `DEEPSEEK_BASE_URL`: The base URL for the DeepSeek API (e.g., `https://api.deepseek.com`)
+- `ALPHA_VANTAGE_API_KEY`: **New!** Your API key for Alpha Vantage. Get a free key from [https://www.alphavantage.co/support/#api-key](https://www.alphavantage.co/support/#api-key)
 - `TESSERACT_CMD`: (Optional) Path to your Tesseract executable if not in system PATH (e.g., `/usr/bin/tesseract` for Linux or `C:\\Program Files\\Tesseract-OCR\\tesseract.exe` for Windows).
 
 **Example `.env` file content:**
@@ -879,6 +995,7 @@ GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY"
 GOOGLE_CSE_ID="YOUR_GOOGLE_CSE_ID"
 DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY"
 DEEPSEEK_BASE_URL="[https://api.deepseek.com](https://api.deepseek.com)"
+ALPHA_VANTAGE_API_KEY="YOUR_ALPHA_VANTAGE_API_KEY"
 # TESSERACT_CMD="/usr/bin/tesseract"
 ```
 """)
