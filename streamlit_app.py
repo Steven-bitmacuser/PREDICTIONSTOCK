@@ -471,6 +471,13 @@ def get_pacific_time():
     pacific = pytz.timezone('America/Los_Angeles')
     return datetime.now(pacific).strftime("%A, %B %d, %Y %I:%M %p %Z")
 
+# New tool function to get current Pacific time
+def getCurrentPacificTime():
+    """
+    Returns the current date and time in Pacific Time (America/Los_Angeles) as a formatted string.
+    """
+    return get_pacific_time()
+
 
 def google_search_chatbot(query, api_key, cse_id, **kwargs):
     try:
@@ -603,7 +610,7 @@ def _scrape_price_from_url(url: str, selector: str, ticker: str, source_name: st
     Returns a dictionary with price and source, or None if unsuccessful.
     """
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        headers = {'User-Agent': 'Mozilla/50 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -642,16 +649,18 @@ def getRealtimeStockData(ticker: str):
     """
     alpha_vantage_api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
     if alpha_vantage_api_key:
-        st.info(f"Attempting to fetch real-time data for {ticker} using Alpha Vantage...")
+        # Removed st.info for tool output visibility
         data = getRealtimeStockData_AlphaVantage(ticker, alpha_vantage_api_key)
         if data and "error" not in data:
             return data
         elif data and "error" in data:
-            st.warning(f"Alpha Vantage error: {data['error']}. Falling back to web scraping.")
+            # Removed st.warning for tool output visibility
+            pass # Keep silent for the user, but log for debugging
         else:
-            st.warning("Alpha Vantage returned no data. Falling back to web scraping.")
+            # Removed st.warning for tool output visibility
+            pass # Keep silent for the user, but log for debugging
 
-    st.info(f"Attempting to scrape real-time data for {ticker}...")
+    # Removed st.info for tool output visibility
     # Fallback to web scraping if Alpha Vantage fails or is not configured
     sources = [
         {"url": f"https://finance.yahoo.com/quote/{ticker}/", "selector": f"fin-qsp-price[data-symbol='{ticker}']", "name": "Yahoo Finance"},
@@ -679,7 +688,7 @@ def getHistoricalStockData(ticker: str, period: str = "1y"):
     Fetches historical stock data using yfinance.
     Period options: "1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"
     """
-    st.info(f"Fetching historical data for {ticker} for period {period}...")
+    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         hist = stock.history(period=period)
@@ -699,7 +708,7 @@ def getCompanyInfo(ticker: str):
     """
     Fetches company information using yfinance.
     """
-    st.info(f"Fetching company info for {ticker}...")
+    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
@@ -747,7 +756,7 @@ def getFinancialStatements(ticker: str, statement_type: str = "income_statement"
     statement_type: "income_statement", "balance_sheet", "cash_flow"
     period: "annual", "quarterly"
     """
-    st.info(f"Fetching {period} {statement_type} for {ticker}...")
+    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         
@@ -776,7 +785,7 @@ def getMajorHolders(ticker: str):
     """
     Fetches major holders information for a given ticker.
     """
-    st.info(f"Fetching major holders for {ticker}...")
+    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         major_holders = stock.major_holders
@@ -794,7 +803,7 @@ def getInstitutionalHolders(ticker: str):
     """
     Fetches institutional holders information for a given ticker.
     """
-    st.info(f"Fetching institutional holders for {ticker}...")
+    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         institutional_holders = stock.institutional_holders
@@ -812,7 +821,7 @@ def getRecommendations(ticker: str):
     """
     Fetches analyst recommendations for a given ticker.
     """
-    st.info(f"Fetching recommendations for {ticker}...")
+    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         recommendations = stock.recommendations
@@ -830,7 +839,7 @@ def getDividends(ticker: str):
     """
     Fetches dividend history for a given ticker.
     """
-    st.info(f"Fetching dividend history for {ticker}...")
+    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         dividends = stock.dividends
@@ -851,7 +860,7 @@ def getEarnings(ticker: str):
     """
     Fetches earnings history (annual and quarterly) for a given ticker.
     """
-    st.info(f"Fetching earnings history for {ticker}...")
+    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         
@@ -883,7 +892,7 @@ def getNews(ticker: str, num_articles: int = 5):
     """
     Fetches recent news articles for a given ticker using Google Search.
     """
-    st.info(f"Searching for recent news for {ticker}...")
+    # Removed st.info for tool output visibility
     query = f"{ticker} stock news"
     news_links = search_news(query, os.getenv("GOOGLE_API_KEY"), os.getenv("GOOGLE_CSE_ID"), num_results=num_articles)
     
@@ -1122,6 +1131,17 @@ tools = [
                 "required": ["query"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "getCurrentPacificTime",
+            "description": "Get the current date and time in Pacific Time (America/Los_Angeles).",
+            "parameters": {
+                "type": "object",
+                "properties": {} # No parameters needed for this function
+            }
+        }
     }
 ]
 
@@ -1137,7 +1157,8 @@ available_tools = {
     "getDividends": getDividends,
     "getEarnings": getEarnings,
     "getNews": getNews,
-    "GoogleSearchAndBrowse": GoogleSearchAndBrowse
+    "GoogleSearchAndBrowse": GoogleSearchAndBrowse,
+    "getCurrentPacificTime": getCurrentPacificTime # Add the new tool here
 }
 
 def run_conversation(messages):
@@ -1148,27 +1169,18 @@ def run_conversation(messages):
     time.sleep(1) # Sleep for 1 second between API calls to avoid hitting rate limits
 
     try:
-        # The messages list passed to client.chat.completions.create needs to be in the correct format.
-        # Streamlit's session_state.messages already holds dictionaries.
-        # We need to ensure that when we append the *model's* response, it's also a dictionary.
-
         response = client.chat.completions.create(
-            model="deepseek-chat", # Changed model to deepseek-chat
-            messages=messages, # messages list already contains dictionaries
+            model="deepseek-chat",
+            messages=messages,
             tools=tools,
-            tool_choice="auto", # Allow the model to decide whether to call a tool
+            tool_choice="auto",
         )
-        response_message = response.choices[0].message # This is an OpenAI ChatCompletionMessage object
+        response_message = response.choices[0].message
         
-        # Check if the model wants to call a tool
         if response_message.tool_calls:
-            # Removed st.write("AI called tool(s):")
-            
-            # Convert the ChatCompletionMessage object for the tool call into a dictionary
-            # and append it to the messages list.
             tool_call_message_dict = {
                 "role": response_message.role,
-                "content": response_message.content or "", # Content can be None for pure tool calls
+                "content": response_message.content or "",
                 "tool_calls": [
                     {
                         "id": tc.id,
@@ -1180,7 +1192,7 @@ def run_conversation(messages):
                     } for tc in response_message.tool_calls
                 ]
             }
-            messages.append(tool_call_message_dict) # Append the assistant's tool call message as a dictionary
+            messages.append(tool_call_message_dict)
 
             for tool_call in response_message.tool_calls:
                 function_name = tool_call.function.name
@@ -1189,12 +1201,8 @@ def run_conversation(messages):
                 if function_to_call:
                     try:
                         function_args = json.loads(tool_call.function.arguments)
-                        # Removed st.write(f"Tool: {function_name}")
                         tool_output = function_to_call(**function_args)
-                        # Removed st.write("Tool Output:")
-                        # Removed st.write(tool_output)
                         
-                        # Append tool output to messages as a dictionary
                         messages.append(
                             {
                                 "tool_call_id": tool_call.id,
@@ -1237,19 +1245,16 @@ def run_conversation(messages):
                         }
                     )
             
-            # Get a new response from the model after tool execution
             second_response = client.chat.completions.create(
-                model="deepseek-chat", # Changed model to deepseek-chat
-                messages=messages, # Pass all messages including tool outputs
+                model="deepseek-chat",
+                messages=messages,
             )
-            # Convert the final response message to a dictionary before returning
             final_response_message_obj = second_response.choices[0].message
             return {
                 "role": final_response_message_obj.role,
                 "content": final_response_message_obj.content or ""
             }
         else:
-            # If no tool call, return the direct response as a dictionary
             return {
                 "role": response_message.role,
                 "content": response_message.content or ""
@@ -1286,17 +1291,60 @@ with tab2:
     st.header("Financial Chatbot")
     st.write("Hello! I'm your financial chatbot. How can I assist you today? You can ask me about real-time stock data, historical data, company information, financial statements, major holders, institutional holders, recommendations, dividends, earnings, or recent news for any stock.")
 
-    # Initialize chat history in session state
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    # Container for chat messages, allowing it to scroll independently
+    chat_container = st.container()
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # Display chat messages from history on app rerun
+    with chat_container:
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
 
-    if prompt := st.chat_input("What's on your mind?"):
+    # Input box at the bottom.
+    # To make it always at the bottom and behave like a sidebar input,
+    # we use a combination of `st.container` and CSS injection.
+    # This approach ensures the input field is fixed at the bottom
+    # while the chat history scrolls.
+
+    # Inject custom CSS for fixed input bar at the bottom
+    st.markdown(
+        """
+        <style>
+        .reportview-container .main .block-container {
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+        }
+        .fixed-bottom-input {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background-color: white; /* Or your app's background color */
+            padding: 10px 0;
+            box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+        /* Adjust padding for the content to not be hidden by the fixed input */
+        .block-container {
+            padding-bottom: 70px; /* Adjust based on the height of your input bar */
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Create a container for the input box at the bottom
+    with st.container():
+        # Apply custom CSS class for fixed positioning
+        st.markdown('<div class="fixed-bottom-input">', unsafe_allow_html=True)
+        prompt = st.chat_input("What's on your mind?", key="chat_input")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+    if prompt:
         # Display user message in chat message container
-        st.chat_message("user").markdown(prompt)
+        with chat_container:
+            st.chat_message("user").markdown(prompt)
         # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
 
@@ -1305,9 +1353,9 @@ with tab2:
             response = run_conversation(st.session_state.messages)
             
             # Display assistant response in chat message container
-            with st.chat_message("assistant"):
-                # Access content using dictionary key
-                st.markdown(response["content"])
+            with chat_container:
+                with st.chat_message("assistant"):
+                    st.markdown(response["content"])
             # Add assistant response to chat history
-            # Ensure the message added to history is also a dictionary
             st.session_state.messages.append({"role": response["role"], "content": response["content"]})
+
