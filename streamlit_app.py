@@ -740,7 +740,7 @@ def chatbot_app():
         tool_output = None
 
         # --- Attempt to detect and execute tool calls based on user input patterns ---
-        # Real-time stock data
+        # 1. Real-time stock data
         if re.search(r'\b(price|current|now)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE):
             match = re.search(r'\b([A-Z]{2,5})\b', prompt)
             if match:
@@ -748,18 +748,61 @@ def chatbot_app():
                 st.chat_message("assistant").write(f"Fetching real-time data for {ticker}...")
                 tool_output = getRealtimeStockData(ticker)
                 tool_executed = True
-        # Historical stock data
-        elif re.search(r'\b(historical|past|data)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE):
-            match = re.search(r'\b([A-Z]{2,5})\b', prompt)
-            if match:
-                ticker = match.group(1).upper()
-                period_match = re.search(r'\b(1d|5d|1mo|3mo|6mo|1y|2y|5y|10y|ytd|max)\b', prompt, re.IGNORECASE)
-                period = period_match.group(1) if period_match else "1mo"
-                st.chat_message("assistant").write(f"Fetching historical data for {ticker} over {period}...")
-                tool_output = getHistoricalStockData(ticker, period)
-                tool_executed = True
-        # Calculate investment gain/loss
-        elif re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE):
+        
+        # 2. Historical stock data (More robust detection for timeframes)
+        # Pattern for "historical data for AAPL" or "last week's AAPL data" or "AAPL stock data for the past 3 months"
+        # Group 1: Main phrase (e.g., "historical", "last week's", "last 3 months")
+        # Group 2: Number (e.g., 3 from "last 3 months")
+        # Group 3: Unit (e.g., "month" from "last 3 months")
+        # Group 4: Ticker symbol
+        historical_match = re.search(r'\b(historical|past|last week\'s|last\s+(\d+)\s*(day|week|month|year)s?)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE)
+        if not tool_executed and historical_match: # Only check if no other tool was executed yet
+            ticker = historical_match.group(4).upper() # Ticker symbol is the fourth capturing group
+
+            period = "1mo" # Default period if no specific duration is found
+
+            if "last week's" in historical_match.group(1).lower():
+                period = "5d" # 5 trading days for "last week"
+            elif historical_match.group(2) and historical_match.group(3): # Check if number and unit are captured
+                num = int(historical_match.group(2))
+                unit = historical_match.group(3).lower()
+                if unit == 'day':
+                    period = f"{num}d"
+                elif unit == 'week':
+                    # yfinance periods are "5d", "1mo", "3mo", etc.
+                    # For weeks, we approximate to days. If too many days, default to months.
+                    calculated_days = num * 5
+                    if calculated_days <= 60: # Keep within reasonable 'd' period range
+                        period = f"{calculated_days}d"
+                    else:
+                        period = "3mo" # Fallback for longer week periods
+                elif unit == 'month':
+                    period = f"{num}mo"
+                elif unit == 'year':
+                    period = f"{num}y"
+            
+            # Ensure period is one of the valid yfinance periods if it's not already
+            valid_yfinance_periods = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
+            if period not in valid_yfinance_periods:
+                # Attempt to map or default if the generated period is not directly supported
+                if period.endswith('d') and int(period[:-1]) > 5:
+                    period = "1mo" # For periods like '10d', '15d' etc.
+                elif period.endswith('w'): # If we somehow ended up with 'w'
+                    period = "1mo"
+                elif period.endswith('mo') and int(period[:-2]) > 10:
+                    period = "1y" # For periods like '12mo'
+                elif period.endswith('y') and int(period[:-1]) > 10:
+                    period = "max" # For very long periods like '15y'
+                # Final fallback if still not valid
+                if period not in valid_yfinance_periods:
+                    period = "1mo" 
+
+            st.chat_message("assistant").write(f"Fetching historical data for {ticker} over {period}...")
+            tool_output = getHistoricalStockData(ticker, period)
+            tool_executed = True
+
+        # 3. Calculate investment gain/loss
+        elif not tool_executed and re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE):
             match = re.search(r'\b(\d+)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE)
             if match:
                 amount = float(match.group(1))
@@ -776,9 +819,8 @@ def chatbot_app():
                 st.chat_message("assistant").write(f"Calculating investment gain/loss for ${amount} in {ticker} {months_ago} months ago...")
                 tool_output = calculateInvestmentGainLoss(ticker, amount, months_ago)
                 tool_executed = True
-        # General web search (if no other tool matches)
-        elif re.search(r'\b(search|find|news|tell me about)\b', prompt, re.IGNORECASE) or not tool_executed:
-            # If no specific stock tool was triggered, consider it a general search
+        # 4. General web search (if no other tool matches)
+        elif not tool_executed: # This ensures it's a fallback
             st.chat_message("assistant").write(f"Searching the web for: '{prompt}'...")
             tool_output = GoogleSearchAndBrowse(prompt)
             tool_executed = True
