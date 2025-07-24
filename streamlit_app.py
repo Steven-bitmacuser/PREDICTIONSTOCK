@@ -371,7 +371,7 @@ def run_analysis_streamlit(uploaded_file, ticker):
         **Required Environment Variables:**
         - `GOOGLE_API_KEY`
         - `GOOGLE_CSE_ID`
-        - `DEEPSEEK_API_KEY`
+        - `DEEPSEEEK_API_KEY`
         - `DEEPSEEK_BASE_URL` (e.g., `https://api.deepseek.com`)
         - `TESSERACT_CMD` (Optional, if tesseract is not in your system's PATH, though auto-detection is preferred)
         """)
@@ -657,7 +657,7 @@ tools = [
 ]
 
 # === Chatbot Core Logic ===
-def run_conversation(messages):
+def run_conversation(current_chat_history): # current_chat_history is st.session_state.messages
     deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
     deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
     if not deepseek_api_key or not deepseek_base_url:
@@ -666,10 +666,38 @@ def run_conversation(messages):
 
     client = openai.OpenAI(api_key=deepseek_api_key, base_url=deepseek_base_url)
 
+    # Prepare messages for the OpenAI API call, converting from simple dicts to OpenAI's expected format
+    api_messages = []
+    for msg in current_chat_history:
+        if msg["role"] == "tool":
+            api_messages.append({
+                "role": "tool",
+                "tool_call_id": msg["tool_call_id"],
+                "name": msg["name"],
+                "content": msg["content"]
+            })
+        elif "tool_calls" in msg and msg["tool_calls"]:
+            # This case handles the AI's response that calls a tool
+            api_messages.append({
+                "role": msg["role"],
+                "content": msg["content"],
+                "tool_calls": [
+                    openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
+                        id=tc["id"],
+                        function=openai.types.chat.chat_completion_message_tool_call.Function(
+                            name=tc["function"]["name"],
+                            arguments=tc["function"]["arguments"]
+                        )
+                    ) for tc in msg["tool_calls"]
+                ]
+            })
+        else:
+            api_messages.append({"role": msg["role"], "content": msg["content"]})
+    
     try:
         response = client.chat.completions.create(
             model="deepseek-chat",
-            messages=messages,
+            messages=api_messages, # Use the converted messages for the API call
             tools=tools,
             tool_choice="auto",
             temperature=0.7,
@@ -695,8 +723,24 @@ def run_conversation(messages):
 
             if function_to_call:
                 function_response = function_to_call(**function_args)
-                messages.append(response_message)
-                messages.append(
+                
+                # Append the AI's tool call message (converted to a simple dict) to current_chat_history
+                current_chat_history.append({
+                    "role": response_message.role,
+                    "content": response_message.content,
+                    "tool_calls": [ # Store tool_calls info in a serializable dict format
+                        {
+                            "id": tc.id,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        } for tc in response_message.tool_calls
+                    ]
+                })
+
+                # Append the tool's response (as a simple dict) to current_chat_history
+                current_chat_history.append(
                     {
                         "tool_call_id": tool_call.id,
                         "role": "tool",
@@ -704,17 +748,48 @@ def run_conversation(messages):
                         "content": function_response,
                     }
                 )
+                
+                # Prepare messages for the second API call using the updated current_chat_history
+                api_messages_for_second_call = []
+                for msg in current_chat_history:
+                    if msg["role"] == "tool":
+                        api_messages_for_second_call.append({
+                            "role": "tool",
+                            "tool_call_id": msg["tool_call_id"],
+                            "name": msg["name"],
+                            "content": msg["content"]
+                        })
+                    elif "tool_calls" in msg and msg["tool_calls"]:
+                        api_messages_for_second_call.append({
+                            "role": msg["role"],
+                            "content": msg["content"],
+                            "tool_calls": [
+                                openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
+                                    id=tc["id"],
+                                    function=openai.types.chat.chat_completion_message_tool_call.Function(
+                                        name=tc["function"]["name"],
+                                        arguments=tc["function"]["arguments"]
+                                    )
+                                ) for tc in msg["tool_calls"]
+                            ]
+                        })
+                    else:
+                        api_messages_for_second_call.append({"role": msg["role"], "content": msg["content"]})
+
+
                 second_response = client.chat.completions.create(
                     model="deepseek-chat",
-                    messages=messages,
+                    messages=api_messages_for_second_call, # Use the converted messages for the API call
                     temperature=0.7,
                     timeout=120.0
                 )
-                return second_response.choices[0].message
+                # Return the final assistant message as a simple dictionary
+                return {"role": second_response.choices[0].message.role, "content": second_response.choices[0].message.content}
             else:
                 return {"role": "assistant", "content": f"Error: Tool '{function_name}' not found."}
         else:
-            return response_message
+            # Return the assistant message as a simple dictionary
+            return {"role": response_message.role, "content": response_message.content}
     except openai.APITimeoutError:
         return {"role": "assistant", "content": "The AI request timed out. Please try again."}
     except Exception as e:
@@ -784,19 +859,15 @@ def chatbot_app():
 
         # Get assistant response
         with st.spinner("Thinking..."):
-            response = run_conversation(st.session_state.messages)
-            if isinstance(response, dict): # Handle dictionary response for errors/tool calls
-                assistant_response_content = response.get("content", "No response content.")
-                assistant_response_role = response.get("role", "assistant")
-            else: # Handle Message object from OpenAI API
-                assistant_response_content = response.content
-                assistant_response_role = response.role
+            # Pass st.session_state.messages directly to run_conversation
+            # run_conversation will modify this list in place and ensure it contains only dictionaries
+            assistant_response_dict = run_conversation(st.session_state.messages) 
 
             # Display assistant response in chat history
-            with st.chat_message(assistant_response_role):
-                st.markdown(assistant_response_content)
-            # Add assistant response to chat history
-            st.session_state.messages.append({"role": assistant_response_role, "content": assistant_response_content})
+            with st.chat_message(assistant_response_dict["role"]):
+                st.markdown(assistant_response_dict["content"])
+            # The assistant_response_dict is already part of st.session_state.messages due to in-place modification
+            # in run_conversation, so no need to append it again here.
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("#### About")
