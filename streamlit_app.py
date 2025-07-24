@@ -520,7 +520,7 @@ def getRealtimeStockData(ticker: str):
         price = data.get('regularMarketPrice')
         open_price = data.get('regularMarketOpen')
         day_high = data.get('regularMarketDayHigh')
-        day_low = data.get('regularMarketDayLow')
+        day_low = data.get('regularMarketLow')
         volume = data.get('regularMarketVolume')
         market_time_ts = data.get('regularMarketTime')
         if price is None:
@@ -752,7 +752,7 @@ def run_conversation(current_chat_history): # current_chat_history is st.session
             # Ensure content is None when tool_calls are present
             current_chat_history.append({
                 "role": response_message.role,
-                "content": None,
+                "content": None, # Explicitly set content to None for tool_calls messages
                 "tool_calls": [ # Store tool_calls info in a serializable dict format
                     {
                         "id": tc.id,
