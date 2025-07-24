@@ -26,6 +26,10 @@ import time # Import time for rate limiting
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 load_dotenv()  # Load environment variables from .env file
 
+# Initialize chat history in session state at the top level
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 # --- Configure pytesseract ---
 try:
     # Attempt to find tesseract in the system's PATH first
@@ -1358,4 +1362,3 @@ with tab2:
                     st.markdown(response["content"])
             # Add assistant response to chat history
             st.session_state.messages.append({"role": response["role"], "content": response["content"]})
-
