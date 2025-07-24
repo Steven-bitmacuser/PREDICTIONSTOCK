@@ -105,7 +105,7 @@ def extract_price_curve(image):
         inverted_left_roi = cv2.bitwise_not(gray_left_roi)
         _, ocr_thresh_left = cv2.threshold(inverted_left_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         ocr_data_left = pytesseract.image_to_data(ocr_thresh_left, output_type=pytesseract.Output.DICT,
-                                                  config='--psm 6')
+                                                   config='--psm 6')
         potential_y_axes_data.append((ocr_data_left, y_axis_roi_y_start, "left"))
 
     right_roi = image_cv[y_axis_roi_y_start:y_axis_roi_y_end, right_y_axis_roi_x_start:right_y_axis_roi_x_end]
@@ -114,7 +114,7 @@ def extract_price_curve(image):
         inverted_right_roi = cv2.bitwise_not(gray_right_roi)
         _, ocr_thresh_right = cv2.threshold(inverted_right_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         ocr_data_right = pytesseract.image_to_data(ocr_thresh_right, output_type=pytesseract.Output.DICT,
-                                                   config='--psm 6')
+                                                     config='--psm 6')
         potential_y_axes_data.append((ocr_data_right, y_axis_roi_y_start, "right"))
 
     y_axis_labels = []
@@ -311,14 +311,14 @@ def analyze_news(news_links, api_key, base_url):
         return {"overall_summary": "No news links provided for analysis.", "news_items": []}
     client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=120.0)
     prompt = (
-            "Analyze the sentiment and importance of the following news links regarding a stock.\\n\\n" +
-            "\\n".join(news_links) +
-            "\\n\\nFor each news item, provide:\\n"
-            "- sentiment: 'positive', 'neutral', or 'negative'.\\n"
-            "- importance: A score from 0.0 (low) to 1.0 (high).\\n"
-            "- explanation: A detailed summary of why this sentiment and importance were assigned.\\n\\n"
-            "Return the result as a JSON object with two keys: 'overall_summary' (a concise string summarizing the collective sentiment and key themes from all analyzed news links) and 'news_items' (a list of objects, each with 'sentiment', 'importance', and 'explanation'). DO NOT include any other text, conversational elements, or markdown formatting outside the JSON object. ONLY the JSON object.\\nFor example: "
-            '{"overall_summary": "Overall summary of news...", "news_items": [{"sentiment": "positive", "importance": 0.8, "explanation": "..."}, {"sentiment": "neutral", "importance": 0.6, "explanation": "..."}]}'
+                "Analyze the sentiment and importance of the following news links regarding a stock.\\n\\n" +
+                "\\n".join(news_links) +
+                "\\n\\nFor each news item, provide:\\n"
+                "- sentiment: 'positive', 'neutral', or 'negative'.\\n"
+                "- importance: A score from 0.0 (low) to 1.0 (high).\\n"
+                "- explanation: A detailed summary of why this sentiment and importance were assigned.\\n\\n"
+                "Return the result as a JSON object with two keys: 'overall_summary' (a concise string summarizing the collective sentiment and key themes from all analyzed news links) and 'news_items' (a list of objects, each with 'sentiment', 'importance', and 'explanation'). DO NOT include any other text, conversational elements, or markdown formatting outside the JSON object. ONLY the JSON object.\\nFor example: "
+                '{"overall_summary": "Overall summary of news...", "news_items": [{"sentiment": "positive", "importance": 0.8, "explanation": "..."}, {"sentiment": "neutral", "importance": 0.6, "explanation": "..."}]}'
     )
     logging.info("Requesting news sentiment analysis from AI... This may take a moment.")
     try:
@@ -460,7 +460,7 @@ def run_analysis_streamlit(uploaded_file, ticker):
     st.subheader("Final Prediction Summary:")
     st.write(f"**Last historical price:** ${y_hist[-1]:.2f}")
     st.write(f"**Predicted price after 50 time steps:** ${y_future_adjusted[-1]:.2f}")
-    f"**Overall News Sentiment:** {overall_news_summary}"
+    st.write(f"**Overall News Sentiment:** {overall_news_summary}")
 
 
 # === Financial Chatbot Functions ===
@@ -517,24 +517,48 @@ def GoogleSearchAndBrowse(query):
 
 
 def getRealtimeStockData(ticker: str):
+    """
+    Get real-time stock data for a ticker symbol.
+    This function will attempt to use YFinance first, and if data is unavailable or incomplete,
+    it will fall back to a Google Search to find the latest price.
+    """
     try:
         stock = yf.Ticker(ticker)
         data = stock.info
-        if not data:
-            return f"No data found for ticker '{ticker}'."
+        if not data or data.get('regularMarketPrice') is None:
+            # If yfinance fails or price is not available, try Google Search as fallback
+            st.warning(f"⚠️ YFinance did not return complete real-time data for '{ticker}'. Attempting Google Search fallback.")
+            search_query = f"real-time stock price {ticker}"
+            search_result_content = GoogleSearchAndBrowse(search_query) # Call the search/browse function
+            
+            # Attempt to parse price from the search result content
+            price_match = re.search(r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{1,4})?)', search_result_content)
+            if price_match:
+                try:
+                    extracted_price = float(price_match.group(1).replace(',', ''))
+                    return (
+                        f"**Real-time data for {ticker.upper()} (via Google Search Fallback):**\n\n"
+                        f"**Current Price:** ${extracted_price:.2f}\n"
+                        f"**Source Content:** {search_result_content[:500]}..." # Show snippet of source
+                    )
+                except ValueError:
+                    pass # Fall through to returning raw search content if price parsing fails
+
+            return f"Could not retrieve real-time price for '{ticker}' from YFinance or Google Search. Search result: {search_result_content}"
+
         price = data.get('regularMarketPrice')
         open_price = data.get('regularMarketOpen')
         day_high = data.get('regularMarketDayHigh')
         day_low = data.get('regularMarketLow')
         volume = data.get('regularMarketVolume')
         market_time_ts = data.get('regularMarketTime')
-        if price is None:
-            return f"Price data not available for '{ticker}'."
+        
         if market_time_ts:
             dt = datetime.fromtimestamp(market_time_ts, pytz.utc).astimezone(pytz.timezone('America/New_York'))
             time_str = dt.strftime("%Y-%m-%d %I:%M %p %Z")
         else:
             time_str = "N/A"
+            
         return (
             f"**Real-time data for {ticker.upper()}:**\n\n"
             f"**Current Price:** ${price:.2f}\n"
@@ -544,7 +568,23 @@ def getRealtimeStockData(ticker: str):
             f"**Last Updated:** {time_str}"
         )
     except Exception as e:
-        return f"Error fetching real-time data for {ticker}: {e}"
+        st.warning(f"⚠️ An error occurred fetching real-time data for {ticker} from YFinance: {e}. Attempting Google Search fallback.")
+        search_query = f"real-time stock price {ticker}"
+        search_result_content = GoogleSearchAndBrowse(search_query)
+        
+        price_match = re.search(r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{1,4})?)', search_result_content)
+        if price_match:
+            try:
+                extracted_price = float(price_match.group(1).replace(',', ''))
+                return (
+                    f"**Real-time data for {ticker.upper()} (via Google Search Fallback):**\n\n"
+                    f"**Current Price:** ${extracted_price:.2f}\n"
+                    f"**Source Content:** {search_result_content[:500]}..."
+                )
+            except ValueError:
+                pass
+        
+        return f"Error fetching real-time data for {ticker}: {e}. Google Search fallback also failed to find a clear price. Search result: {search_result_content}"
 
 
 def getHistoricalStockData(ticker: str, period: str = "1mo"):
@@ -586,13 +626,12 @@ def calculateInvestmentGainLoss(ticker: str, amount_usd: float, months_ago: int 
 
 
 # === Tools Definition for Chatbot ===
-# Removed GoogleSearchAndBrowse from here, as it will be called directly.
 tools = [
     {
         "type": "function",
         "function": {
             "name": "getRealtimeStockData",
-            "description": "Get real-time stock data for a ticker symbol.",
+            "description": "Get real-time stock data for a ticker symbol. This function will attempt to use YFinance first, and if data is unavailable or incomplete, it will fall back to a Google Search to find the latest price.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -651,6 +690,23 @@ tools = [
                 "required": ["ticker", "amount_usd"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "GoogleSearchAndBrowse",
+            "description": "Perform a Google search for a given query and browse the top result to extract relevant content. Useful for general information, news, or when specific data tools fail.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to use for Google search."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
     }
 ]
 
@@ -676,11 +732,6 @@ def run_conversation(current_chat_history):  # current_chat_history is st.sessio
     # Prepare messages for the OpenAI API call, converting from simple dicts to OpenAI's expected format
     api_messages = []
     for msg in current_chat_history:
-        # If the message is from the assistant and has 'tool_calls', its content MUST be None.
-        # However, since we are no longer using OpenAI's native tool_calls, this block
-        # for `tool_calls` in `msg` should theoretically not be hit for assistant messages
-        # generated by the DeepSeek model itself. It's kept for robustness if a future
-        # model version or external source introduces tool_calls.
         if msg["role"] == "tool":
             api_messages.append({
                 "role": "tool",
@@ -689,178 +740,165 @@ def run_conversation(current_chat_history):  # current_chat_history is st.sessio
                 "content": msg["content"]
             })
         elif "tool_calls" in msg and msg["tool_calls"]:
+            # This branch is for assistant messages that contain tool calls
+            # The content should be None when tool_calls are present
             api_messages.append({
                 "role": msg["role"],
-                "content": None,  # Explicitly set content to None for tool_calls messages
+                "content": None,
                 "tool_calls": [
                     openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
                         id=tc["id"],
-                        type=tc.get("type", "function"),
+                        type=tc.get("type", "function"), # Default to 'function' if type is missing
                         function=openai.types.chat.chat_completion_message_tool_call.Function(
                             name=tc["function"]["name"],
                             arguments=tc["function"]["arguments"]
                         )
-                    ) for tc in msg["tool_calls"]
+                    ) for tc in msg["tool_calls"] # Iterate through tool_calls if multiple
                 ]
             })
         else:
+            # For regular user/assistant messages
             api_messages.append({"role": msg["role"], "content": msg["content"]})
 
     try:
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=api_messages,
-            # Removed tools and tool_choice parameters as we are handling tools manually
-            temperature=0.7,
-            timeout=120.0
+            tools=tools, # Pass the tools definition
+            tool_choice="auto", # Allow the model to choose tools
+            stream=False # Not streaming for simplicity in this function
         )
+
         response_message = response.choices[0].message
+        tool_calls = response_message.tool_calls
 
-        # DeepSeek will now only return text responses, not tool_calls.
-        final_assistant_message = {"role": response_message.role,
-                                   "content": response_message.content if response_message.content is not None else ""}
-        return final_assistant_message
-    except openai.APITimeoutError:
-        return {"role": "assistant", "content": "The AI request timed out. Please try again."}
-    except Exception as e:
-        return {"role": "assistant", "content": f"An error occurred: {e}"}
+        if tool_calls:
+            # Step 2: Call the model again with the tool output
+            st.info("🤖 AI wants to call a tool...")
+            # Add the assistant's tool call message to the chat history
+            current_chat_history.append({"role": response_message.role, "tool_calls": [{"id": tc.id, "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in tool_calls]})
 
+            for tool_call in tool_calls:
+                function_name = tool_call.function.name
+                function_args = json.loads(tool_call.function.arguments)
+                
+                # Execute the tool function
+                if function_name == "getRealtimeStockData":
+                    tool_response = getRealtimeStockData(ticker=function_args.get("ticker"))
+                elif function_name == "getHistoricalStockData":
+                    tool_response = getHistoricalStockData(ticker=function_args.get("ticker"), period=function_args.get("period", "1mo"))
+                elif function_name == "calculateInvestmentGainLoss":
+                    tool_response = calculateInvestmentGainLoss(
+                        ticker=function_args.get("ticker"),
+                        amount_usd=function_args.get("amount_usd"),
+                        months_ago=function_args.get("months_ago", 1)
+                    )
+                elif function_name == "GoogleSearchAndBrowse": # New tool
+                    tool_response = GoogleSearchAndBrowse(query=function_args.get("query"))
+                else:
+                    tool_response = f"Error: Unknown tool function: {function_name}"
 
-# === Streamlit App Functions ===
-def predictor_app():
-    st.title("AI-Powered Stock Price Predictor")
-    st.markdown("""
-    Upload a stock chart image and enter a ticker symbol to get a future price prediction,
-    adjusted by real-time news sentiment analysis.
-    """)
+                # Add tool response to chat history
+                current_chat_history.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": function_name,
+                    "content": tool_response
+                })
+                st.info(f"🛠️ Tool '{function_name}' executed. Response: {tool_response[:100]}...") # Show snippet
 
-    st.sidebar.header("Inputs")
-    uploaded_file = st.sidebar.file_uploader("Upload a Stock Chart Image", type=["png", "jpg", "jpeg"])
-    ticker = st.sidebar.text_input("Enter Stock Ticker Symbol (e.g., AAPL, GOOGL, TSLA)", "AAPL")
-
-    if st.sidebar.button("Run Analysis"):
-        if uploaded_file is not None and ticker:
-            run_analysis_streamlit(uploaded_file, ticker)
+            # Call the model again to get a final response based on tool output
+            final_response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=api_messages + current_chat_history[-len(tool_calls)-1:], # Send all previous messages + tool call + tool output
+                stream=False
+            )
+            return final_response.choices[0].message
         else:
-            st.sidebar.warning("Please upload an image and enter a ticker symbol.")
+            # No tool call, return the assistant's direct response
+            return response_message
 
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("#### About")
-    st.sidebar.info(
-        "This application uses Computer Vision (OpenCV, Tesseract OCR) to extract historical stock data from an image, "
-        "linear regression for initial prediction, and AI (DeepSeek API) for real-time news sentiment analysis "
-        "to adjust the future price forecast."
-    )
+    except openai.APIError as e:
+        st.error(f"❌ OpenAI API Error: {e}")
+        return {"role": "assistant", "content": f"An API error occurred: {e}"}
+    except Exception as e:
+        st.error(f"❌ An unexpected error occurred in run_conversation: {e}")
+        return {"role": "assistant", "content": f"An unexpected error occurred: {e}"}
 
+# --- Streamlit UI ---
+st.set_page_config(page_title="Stock Predictor & Financial Chatbot", layout="wide")
 
-def chatbot_app():
-    st.title("Financial Chatbot")
-    st.markdown("Ask me anything about stocks or general financial news!")
-    st.markdown(f"Current Pacific Time: {get_pacific_time()}")
+st.title("Stock Price Predictor & Financial Chatbot")
+
+# Sidebar for API Key Instructions
+st.sidebar.header("API Key Setup")
+st.sidebar.markdown("""
+To use this application, you need to set up the following environment variables (e.g., in a `.env` file in your project directory or as Streamlit secrets):
+
+- `GOOGLE_API_KEY`: Your API key for Google Custom Search.
+- `GOOGLE_CSE_ID`: Your Custom Search Engine ID.
+- `DEEPSEEK_API_KEY`: Your API key for DeepSeek.
+- `DEEPSEEK_BASE_URL`: The base URL for the DeepSeek API (e.g., `https://api.deepseek.com`).
+- `TESSERACT_CMD`: (Optional) Path to your Tesseract executable if not in system PATH (e.g., `/usr/bin/tesseract` for Linux or `C:\\Program Files\\Tesseract-OCR\\tesseract.exe` for Windows).
+
+**Example `.env` file content:**
+```
+GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY"
+GOOGLE_CSE_ID="YOUR_GOOGLE_CSE_ID"
+DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY"
+DEEPSEEK_BASE_URL="[https://api.deepseek.com](https://api.deepseek.com)"
+# TESSERACT_CMD="/usr/bin/tesseract"
+```
+""")
+
+# Main content area
+tab1, tab2 = st.tabs(["📈 Stock Price Predictor", "💬 Financial Chatbot"])
+
+with tab1:
+    st.header("Upload Chart for Price Prediction")
+    uploaded_file = st.file_uploader("Choose an image file (e.g., PNG, JPG)", type=["png", "jpg", "jpeg"])
+    ticker_input = st.text_input("Enter Stock Ticker Symbol (e.g., AAPL, GOOGL)", "AAPL")
+
+    if uploaded_file and ticker_input:
+        if st.button("Run Prediction"):
+            run_analysis_streamlit(uploaded_file, ticker_input.strip().upper())
+    elif uploaded_file:
+        st.info("Please enter a stock ticker symbol to run the prediction.")
+    elif ticker_input:
+        st.info("Please upload a stock chart image to run the prediction.")
+    else:
+        st.info("Upload a stock chart image and enter a ticker symbol to get started.")
+
+with tab2:
+    st.header("Ask Your Financial Questions")
 
     # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
+        st.session_state.messages.append({"role": "assistant", "content": "Hello! I'm your financial chatbot. How can I assist you today?"})
 
-    # Display chat messages from history
+    # Display chat messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+            if message["role"] == "tool":
+                st.markdown(f"**Tool Output:**\n```\n{message['content']}\n```")
+            elif "tool_calls" in message and message["tool_calls"]:
+                st.markdown(f"**AI called tool(s):** {', '.join([tc['function']['name'] for tc in message['tool_calls']])}")
+            else:
+                st.markdown(message["content"])
 
-    # React to user input
+    # Chat input
     if prompt := st.chat_input("What's on your mind?"):
-        # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
-        st.chat_message("user").markdown(prompt)  # Display immediately
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-        # Flag to check if a tool was executed
-        tool_executed = False
-        tool_output = None
-
-        # --- Attempt to detect and execute tool calls based on user input patterns ---
-        # Real-time stock data
-        if re.search(r'\b(price|current|now)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE):
-            match = re.search(r'\b([A-Z]{2,5})\b', prompt)
-            if match:
-                ticker = match.group(1).upper()
-                st.chat_message("assistant").write(f"Fetching real-time data for {ticker}...")
-                tool_output = getRealtimeStockData(ticker)
-                tool_executed = True
-        # Historical stock data
-        elif re.search(r'\b(historical|past|data)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE):
-            match = re.search(r'\b([A-Z]{2,5})\b', prompt)
-            if match:
-                ticker = match.group(1).upper()
-                period_match = re.search(r'\b(1d|5d|1mo|3mo|6mo|1y|2y|5y|10y|ytd|max)\b', prompt, re.IGNORECASE)
-                period = period_match.group(1) if period_match else "1mo"
-                st.chat_message("assistant").write(f"Fetching historical data for {ticker} over {period}...")
-                tool_output = getHistoricalStockData(ticker, period)
-                tool_executed = True
-        # Calculate investment gain/loss
-        elif re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE):
-            match = re.search(r'\b(\d+)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE)
-            if match:
-                amount = float(match.group(1))
-                ticker = match.group(2).upper()
-                months_ago_match = re.search(r'(\d+)\s*(month|year)s?\s*ago', prompt, re.IGNORECASE)
-                months_ago = 1
-                if months_ago_match:
-                    num = int(months_ago_match.group(1))
-                    unit = months_ago_match.group(2).lower()
-                    if unit == 'year':
-                        months_ago = num * 12
-                    else:
-                        months_ago = num
-                st.chat_message("assistant").write(
-                    f"Calculating investment gain/loss for ${amount} in {ticker} {months_ago} months ago...")
-                tool_output = calculateInvestmentGainLoss(ticker, amount, months_ago)
-                tool_executed = True
-        # General web search (if no other tool matches)
-        elif re.search(r'\b(search|find|news|tell me about)\b', prompt, re.IGNORECASE) or not tool_executed:
-            # If no specific stock tool was triggered, consider it a general search
-            st.chat_message("assistant").write(f"Searching the web for: '{prompt}'...")
-            tool_output = GoogleSearchAndBrowse(prompt)
-            tool_executed = True
-
-        if tool_executed:
-            # Append tool output to history and display it
-            st.session_state.messages.append({"role": "assistant", "content": tool_output})
-            with st.chat_message("assistant"):
-                st.markdown(tool_output)
-
-            # Now, send the full history (including user prompt and tool output) to DeepSeek
-            # for a conversational response based on the tool's output.
+        with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                assistant_response_dict = run_conversation(st.session_state.messages)
-                st.session_state.messages.append(assistant_response_dict)
-                with st.chat_message(assistant_response_dict["role"]):
-                    st.markdown(assistant_response_dict["content"])
-        else:
-            # If no tool was executed, just run the conversation for a direct AI response
-            with st.spinner("Thinking..."):
-                assistant_response_dict = run_conversation(st.session_state.messages)
-                st.session_state.messages.append(assistant_response_dict)
-                with st.chat_message(assistant_response_dict["role"]):
-                    st.markdown(assistant_response_dict["content"])
+                response = run_conversation(st.session_state.messages)
+                if response:
+                    st.markdown(response.content)
+                    st.session_state.messages.append({"role": "assistant", "content": response.content})
+                else:
+                    st.error("Could not get a response from the AI.")
 
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("#### About")
-    st.sidebar.info(
-        "This chatbot can fetch real-time and historical stock data, calculate investment returns, "
-        "and browse the web for general financial information using DeepSeek AI and Google Search."
-    )
-
-
-# --- Main Streamlit App Layout ---
-st.set_page_config(page_title="Financial AI Suite", layout="wide")
-
-st.sidebar.title("Choose Your Mode")
-selected_mode = st.sidebar.radio(
-    "Select an application:",
-    ("Stock Price Predictor", "Financial Chatbot")
-)
-
-if selected_mode == "Stock Price Predictor":
-    predictor_app()
-elif selected_mode == "Financial Chatbot":
-    chatbot_app()
