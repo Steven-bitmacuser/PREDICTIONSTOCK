@@ -495,7 +495,7 @@ def browse_page(url):
         return None
 
 
-def GoogleSearchAndBrowse(query):
+def GoogleSearchAndBrowse(query, num_results=3): # Added num_results parameter
     google_api_key = os.getenv("GOOGLE_API_KEY")
     google_cse_id = os.getenv("GOOGLE_CSE_ID")
     if not google_api_key or not google_cse_id:
@@ -505,15 +505,24 @@ def GoogleSearchAndBrowse(query):
     current_time_pacific = get_pacific_time()
     query_with_time = f"{query} as of {current_time_pacific}"
 
-    results = google_search_chatbot(query_with_time, google_api_key, google_cse_id, num=1)
+    results = google_search_chatbot(query_with_time, google_api_key, google_cse_id, num=num_results) # Use num_results
     if not results:
         return f"🕸️ No Google search results found for query: '{query_with_time}'."
-    url = results[0].get('link')
-    content = browse_page(url)
-    if not content:
-        return f"Could not retrieve content from {url} for query: '{query_with_time}'."
-    # Return a formatted string instead of a dictionary
-    return f"Search Result for '{query_with_time}':\nSource: {url}\nContent: {content}"
+
+    all_content = []
+    for i, item in enumerate(results):
+        url = item.get('link')
+        if url:
+            content = browse_page(url)
+            if content:
+                all_content.append(f"--- Source {i+1}: {url} ---\n{content}")
+            else:
+                all_content.append(f"--- Source {i+1}: {url} ---\nCould not retrieve content.")
+
+    if not all_content:
+        return f"Could not retrieve content from any source for query: '{query_with_time}'."
+
+    return f"Search Results for '{query_with_time}':\n" + "\n\n".join(all_content)
 
 
 def getRealtimeStockData(ticker: str):
@@ -529,7 +538,8 @@ def getRealtimeStockData(ticker: str):
             # If yfinance fails or price is not available, try Google Search as fallback
             st.warning(f"⚠️ YFinance did not return complete real-time data for '{ticker}'. Attempting Google Search fallback.")
             search_query = f"real-time stock price {ticker}"
-            search_result_content = GoogleSearchAndBrowse(search_query) # Call the search/browse function
+            # Request only 1 result for the specific price fallback
+            search_result_content = GoogleSearchAndBrowse(search_query, num_results=1)
             
             # Attempt to parse price from the search result content
             price_match = re.search(r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{1,4})?)', search_result_content)
@@ -570,7 +580,8 @@ def getRealtimeStockData(ticker: str):
     except Exception as e:
         st.warning(f"⚠️ An error occurred fetching real-time data for {ticker} from YFinance: {e}. Attempting Google Search fallback.")
         search_query = f"real-time stock price {ticker}"
-        search_result_content = GoogleSearchAndBrowse(search_query)
+        # Request only 1 result for the specific price fallback
+        search_result_content = GoogleSearchAndBrowse(search_query, num_results=1)
         
         price_match = re.search(r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{1,4})?)', search_result_content)
         if price_match:
@@ -695,13 +706,18 @@ tools = [
         "type": "function",
         "function": {
             "name": "GoogleSearchAndBrowse",
-            "description": "Perform a Google search for a given query and browse the top result to extract relevant content. Useful for general information, news, or when specific data tools fail.",
+            "description": "Perform a Google search for a given query and browse the top results to extract relevant content. Useful for general information, news, or when specific data tools fail. Can retrieve content from multiple sources.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
                         "description": "The search query to use for Google search."
+                    },
+                    "num_results": {
+                        "type": "integer",
+                        "description": "The number of top search results to browse (default 3).",
+                        "minimum": 1
                     }
                 },
                 "required": ["query"]
@@ -748,7 +764,7 @@ def run_conversation(current_chat_history):  # current_chat_history is st.sessio
                 "tool_calls": [
                     openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
                         id=tc["id"],
-                        type=tc.get("type", "function"), # Default to 'function' if type is missing
+                        type=tc["type"], # Explicitly include 'type' here
                         function=openai.types.chat.chat_completion_message_tool_call.Function(
                             name=tc["function"]["name"],
                             arguments=tc["function"]["arguments"]
@@ -776,7 +792,20 @@ def run_conversation(current_chat_history):  # current_chat_history is st.sessio
             # Step 2: Call the model again with the tool output
             st.info("🤖 AI wants to call a tool...")
             # Add the assistant's tool call message to the chat history
-            current_chat_history.append({"role": response_message.role, "tool_calls": [{"id": tc.id, "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in tool_calls]})
+            # Ensure 'type' is included when storing tool_calls in session_state
+            current_chat_history.append({
+                "role": response_message.role,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": tc.type, # Explicitly include type from the model's response
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    } for tc in tool_calls
+                ]
+            })
 
             for tool_call in tool_calls:
                 function_name = tool_call.function.name
@@ -794,7 +823,10 @@ def run_conversation(current_chat_history):  # current_chat_history is st.sessio
                         months_ago=function_args.get("months_ago", 1)
                     )
                 elif function_name == "GoogleSearchAndBrowse": # New tool
-                    tool_response = GoogleSearchAndBrowse(query=function_args.get("query"))
+                    tool_response = GoogleSearchAndBrowse(
+                        query=function_args.get("query"),
+                        num_results=function_args.get("num_results", 3) # Use num_results from tool call, default to 3
+                    )
                 else:
                     tool_response = f"Error: Unknown tool function: {function_name}"
 
@@ -901,4 +933,3 @@ with tab2:
                     st.session_state.messages.append({"role": "assistant", "content": response.content})
                 else:
                     st.error("Could not get a response from the AI.")
-
