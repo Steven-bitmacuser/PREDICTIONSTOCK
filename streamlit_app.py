@@ -597,12 +597,57 @@ def getRealtimeStockData_AlphaVantage(ticker: str, api_key: str):
         logging.error(f"❌ An unexpected error occurred with Alpha Vantage for {ticker}: {e}")
         return {"error": f"An unexpected error occurred with Alpha Vantage: {e}"}
 
+def _scrape_price_from_url(url: str, selector: str, ticker: str, source_name: str):
+    """
+    Attempts to scrape a stock price from a specific URL using BeautifulSoup and a CSS selector.
+    Returns a dictionary with price and source, or None if unsuccessful.
+    """
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Find the element using the provided CSS selector
+        price_element = soup.select_one(selector)
+        
+        if price_element:
+            price_text = price_element.get_text(strip=True)
+            # Clean the price text (remove currency symbols, commas, etc.)
+            cleaned_price_str = re.sub(r'[^\d.,]', '', price_text)
+            # Handle comma as decimal separator (European format) if present
+            if ',' in cleaned_price_str and '.' in cleaned_price_str:
+                # If comma is the last separator, assume European decimal
+                if cleaned_price_str.rfind(',') > cleaned_price_str.rfind('.'):
+                    cleaned_price_str = cleaned_price_str.replace('.', '').replace(',', '.')
+                else: # Assume US thousands separator
+                    cleaned_price_str = cleaned_price_str.replace(',', '')
+            else: # Only commas or only dots, assume standard US format
+                cleaned_price_str = cleaned_price_str.replace(',', '')
+
+            try:
+                price = float(cleaned_price_str)
+                logging.info(f"Scraped price from {source_name} for {ticker}: {price}")
+                return {"price": price, "source": source_name}
+            except ValueError:
+                logging.warning(f"Could not parse price '{price_text}' from {source_name} for {ticker}.")
+                return None
+        else:
+            logging.warning(f"Price element not found on {source_name} for {ticker} using selector '{selector}'.")
+            return None
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error scraping {source_name} for {ticker}: {e}")
+        return None
+    except Exception as e:
+        logging.error(f"Unexpected error scraping {source_name} for {ticker}: {e}")
+        return None
+
 
 def getRealtimeStockData(ticker: str):
     """
     Get real-time stock data for a ticker symbol.
     This function will attempt to use YFinance first, then Alpha Vantage,
-    and finally fall back to a Google Search to find the latest price.
+    then specific web scraping fallbacks, and finally fall back to a Google Search.
     """
     company_name_map = {
         "600519.SS": "Kweichow Moutai",
@@ -656,11 +701,45 @@ def getRealtimeStockData(ticker: str):
                 f"**Last Updated:** {av_data['time_str']}"
             )
         else:
-            st.warning(f"⚠️ Alpha Vantage did not return complete real-time data for '{ticker}' (Error: {av_data.get('error', 'Unknown')}). Trying Google Search fallback...")
+            st.warning(f"⚠️ Alpha Vantage did not return complete real-time data for '{ticker}' (Error: {av_data.get('error', 'Unknown')}). Trying web scraping fallbacks...")
     else:
         st.warning("⚠️ ALPHA_VANTAGE_API_KEY is not set. Skipping Alpha Vantage lookup.")
 
-    # 3. Fallback to Google Search
+    # 3. Try specific web scraping fallbacks (Investing.com)
+    st.info(f"Attempting to scrape price from Investing.com for '{ticker}'...")
+    investing_url = f"https://www.investing.com/equities/{ticker.lower()}"
+    # This selector is a common pattern for the main price on Investing.com.
+    # It might need adjustment if Investing.com changes its HTML structure.
+    investing_selector = "div.instrument-price_last span" 
+    investing_data = _scrape_price_from_url(investing_url, investing_selector, ticker, "Investing.com")
+    if investing_data and investing_data["price"] is not None:
+        return (
+            f"**Real-time data for {ticker.upper()} (via Investing.com Scrape):**\n\n"
+            f"**Current Price:** ${investing_data['price']:.2f}\n"
+            f"**Source:** {investing_data['source']} (Scraped)\n"
+            f"*(Note: Web scraping is prone to breaking if website structure changes.)*"
+        )
+    else:
+        st.warning(f"⚠️ Failed to scrape real-time data from Investing.com for '{ticker}'. Trying StockAnalysis.com...")
+
+    # 4. Try specific web scraping fallbacks (StockAnalysis.com)
+    st.info(f"Attempting to scrape price from StockAnalysis.com for '{ticker}'...")
+    stockanalysis_url = f"https://stockanalysis.com/stocks/{ticker.lower()}/"
+    # This selector is a common pattern for the main price on StockAnalysis.com.
+    # It might need adjustment if StockAnalysis.com changes its HTML structure.
+    stockanalysis_selector = "span.s-price" 
+    stockanalysis_data = _scrape_price_from_url(stockanalysis_url, stockanalysis_selector, ticker, "StockAnalysis.com")
+    if stockanalysis_data and stockanalysis_data["price"] is not None:
+        return (
+            f"**Real-time data for {ticker.upper()} (via StockAnalysis.com Scrape):**\n\n"
+            f"**Current Price:** ${stockanalysis_data['price']:.2f}\n"
+            f"**Source:** {stockanalysis_data['source']} (Scraped)\n"
+            f"*(Note: Web scraping is prone to breaking if website structure changes.)*"
+        )
+    else:
+        st.warning(f"⚠️ Failed to scrape real-time data from StockAnalysis.com for '{ticker}'. Falling back to Google Search...")
+
+    # 5. Fallback to Google Search (existing code)
     st.info(f"Attempting Google Search fallback for '{ticker}'...")
     search_queries_to_try = [
         f"real-time stock price {ticker}",
@@ -748,7 +827,7 @@ def calculateInvestmentGainLoss(ticker: str, amount_usd: float, months_ago: int 
             f"- {'Gain' if profit > 0 else 'Loss'}: ${abs(profit):.2f} ({percent:.2f}%)"
         )
     except Exception as e:
-        return f"Error calculating investment gain/loss for {ticker}: {e}"
+        return f"Error calculating investment gain/loss for {ticker} ({period}): {e}"
 
 
 # === Tools Definition for Chatbot ===
@@ -882,7 +961,7 @@ def run_conversation(current_chat_history):  # current_chat_history is st.sessio
                         type=tc["type"], # Explicitly include 'type' here
                         function=openai.types.chat.chat_completion_message_tool_call.Function(
                             name=tc["function"]["name"],
-                            arguments=tc["function"]["arguments"]
+                            arguments=tc["function"].arguments
                         )
                     ) for tc in msg["tool_calls"] # Iterate through tool_calls if multiple
                 ]
