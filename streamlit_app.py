@@ -566,9 +566,30 @@ def getHistoricalStockData(ticker: str, period: str = "1mo"):
         df.reset_index(inplace=True)
         # Removed .tail() to show all data for the requested period
         df_to_display = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
-        return f"Historical data for {ticker.upper()} ({period}):\n{df_to_display.to_string(index=False)}"
+        
+        # Calculate summary statistics for the AI to use
+        summary_stats = {}
+        if not df.empty:
+            summary_stats['last_close'] = df['Close'].iloc[-1]
+            summary_stats['period_high'] = df['High'].max()
+            summary_stats['period_low'] = df['Low'].min()
+            summary_stats['period_volume'] = df['Volume'].sum()
+            
+            # Calculate overall change for the period
+            if len(df) > 1:
+                start_price = df['Open'].iloc[0]
+                end_price = df['Close'].iloc[-1]
+                change = end_price - start_price
+                percent_change = (change / start_price) * 100
+                summary_stats['overall_change'] = f"{change:.2f}"
+                summary_stats['overall_percent_change'] = f"{percent_change:.2f}%"
+            else:
+                summary_stats['overall_change'] = "N/A"
+                summary_stats['overall_percent_change'] = "N/A"
+
+        return f"Historical data for {ticker.upper()} ({period}):\n{df_to_display.to_string(index=False)}", summary_stats
     except Exception as e:
-        return f"Error fetching historical data for {ticker} ({period}): {e}"
+        return f"Error fetching historical data for {ticker} ({period}): {e}", {}
 
 def calculateInvestmentGainLoss(ticker: str, amount_usd: float, months_ago: int = 1):
     end_date = datetime.today()
@@ -755,6 +776,7 @@ def chatbot_app():
         # Flag to check if a tool was executed
         tool_executed = False
         tool_output = None
+        tool_summary_for_ai = "" # New variable to hold summary for AI
 
         # --- 0. Generic Ticker Extraction ---
         # Try to find a ticker symbol (2-5 uppercase letters) anywhere in the prompt
@@ -815,7 +837,21 @@ def chatbot_app():
                         period = "1mo" 
 
                 st.chat_message("assistant").write(f"Fetching historical data for {ticker} over {period}...")
-                tool_output = getHistoricalStockData(ticker, period)
+                raw_tool_output, summary_stats = getHistoricalStockData(ticker, period)
+                tool_output = raw_tool_output # This is the string to display
+                
+                # Prepare a structured summary for the AI
+                if summary_stats:
+                    tool_summary_for_ai = (
+                        f"The user has been provided with historical stock data for {ticker} for the period {period}.\n"
+                        f"Key facts from this data:\n"
+                        f"- Last closing price: ${summary_stats.get('last_close', 'N/A'):.2f}\n"
+                        f"- Highest price in this period: ${summary_stats.get('period_high', 'N/A'):.2f}\n"
+                        f"- Lowest price in this period: ${summary_stats.get('period_low', 'N/A'):.2f}\n"
+                        f"- Total trading volume in this period: {summary_stats.get('period_volume', 'N/A'):,.0f} shares\n"
+                        f"- Overall price change for the period: {summary_stats.get('overall_change', 'N/A')} ({summary_stats.get('overall_percent_change', 'N/A')})\n"
+                        f"Please provide a concise, conversational summary or analysis of this data. Do NOT regenerate the table or invent any numbers. Refer ONLY to the facts provided or general market trends relevant to the provided data."
+                    )
                 tool_executed = True
             else:
                 # If historical data is requested but no ticker is found
@@ -865,14 +901,20 @@ def chatbot_app():
             # for a conversational response based on the tool's output.
             with st.spinner("Thinking..."):
                 # Create a temporary message list for DeepSeek to guide its response
-                # This is a key change: we're adding a guiding message *for the AI*
                 temp_messages_for_ai = list(st.session_state.messages) # Copy current history
                 
                 # Add a specific instruction to the AI to prevent hallucination of tables
-                temp_messages_for_ai.append({
-                    "role": "user",
-                    "content": "The previous assistant message contains the direct data requested. Please provide a brief, conversational summary or analysis of this data. Do NOT regenerate the table or list the raw data again. Focus on trends, significant changes, or context."
-                })
+                # Use tool_summary_for_ai if available, otherwise a generic instruction
+                if tool_summary_for_ai:
+                    temp_messages_for_ai.append({
+                        "role": "user",
+                        "content": tool_summary_for_ai
+                    })
+                else:
+                    temp_messages_for_ai.append({
+                        "role": "user",
+                        "content": "The previous assistant message contains the direct data requested. Please provide a brief, conversational summary or analysis of this data. Do NOT regenerate the table or list the raw data again. Focus on trends, significant changes, or context."
+                    })
 
                 assistant_response_dict = run_conversation(temp_messages_for_ai)
                 st.session_state.messages.append(assistant_response_dict) # Append the actual AI response to the main history
