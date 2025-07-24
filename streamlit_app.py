@@ -909,27 +909,34 @@ with tab2:
         st.session_state.messages = []
         st.session_state.messages.append({"role": "assistant", "content": "Hello! I'm your financial chatbot. How can I assist you today?"})
 
-    # Display chat messages
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            if message["role"] == "tool":
-                st.markdown(f"**Tool Output:**\n```\n{message['content']}\n```")
-            elif "tool_calls" in message and message["tool_calls"]:
-                st.markdown(f"**AI called tool(s):** {', '.join([tc['function']['name'] for tc in message['tool_calls']])}")
-            else:
-                st.markdown(message["content"])
+    # Create a container for chat messages with a fixed height and scrollbar
+    chat_history_container = st.container(height=500) # Adjust height as needed
 
-    # Chat input
+    # Display chat messages inside the container
+    with chat_history_container:
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                if message["role"] == "tool":
+                    st.markdown(f"**Tool Output:**\n```\n{message['content']}\n```")
+                elif "tool_calls" in message and message["tool_calls"]:
+                    st.markdown(f"**AI called tool(s):** {', '.join([tc['function']['name'] for tc in message['tool_calls']])}")
+                else:
+                    st.markdown(message["content"])
+
+    # Chat input remains outside the scrollable container, at the bottom
     if prompt := st.chat_input("What's on your mind?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        # Re-run to display the new user message immediately
+        st.rerun()
 
+    # This part will only run after st.rerun() or if no new prompt
+    if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 response = run_conversation(st.session_state.messages)
                 if response:
                     st.markdown(response.content)
                     st.session_state.messages.append({"role": "assistant", "content": response.content})
+                    st.rerun() # Rerun to update chat history container
                 else:
                     st.error("Could not get a response from the AI.")
