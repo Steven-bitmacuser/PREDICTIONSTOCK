@@ -751,12 +751,10 @@ def chatbot_app():
         
         # 2. Historical stock data (More robust detection for timeframes)
         # Pattern for "historical data for AAPL" or "last week's AAPL data" or "AAPL stock data for the past 3 months"
-        # Group 1: Main phrase (e.g., "historical", "last week's", "last 3 months")
-        # Group 2: Number (e.g., 3 from "last 3 months")
-        # Group 3: Unit (e.g., "month" from "last 3 months")
-        # Group 4: Ticker symbol
+        # The ticker is now explicitly required for this pattern to match
         historical_match = re.search(r'\b(historical|past|last week\'s|last\s+(\d+)\s*(day|week|month|year)s?)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE)
-        if not tool_executed and historical_match: # Only check if no other tool was executed yet
+        
+        if not tool_executed and historical_match:
             ticker = historical_match.group(4).upper() # Ticker symbol is the fourth capturing group
 
             period = "1mo" # Default period if no specific duration is found
@@ -769,13 +767,11 @@ def chatbot_app():
                 if unit == 'day':
                     period = f"{num}d"
                 elif unit == 'week':
-                    # yfinance periods are "5d", "1mo", "3mo", etc.
-                    # For weeks, we approximate to days. If too many days, default to months.
                     calculated_days = num * 5
-                    if calculated_days <= 60: # Keep within reasonable 'd' period range
+                    if calculated_days <= 60: 
                         period = f"{calculated_days}d"
                     else:
-                        period = "3mo" # Fallback for longer week periods
+                        period = "3mo" 
                 elif unit == 'month':
                     period = f"{num}mo"
                 elif unit == 'year':
@@ -784,22 +780,25 @@ def chatbot_app():
             # Ensure period is one of the valid yfinance periods if it's not already
             valid_yfinance_periods = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
             if period not in valid_yfinance_periods:
-                # Attempt to map or default if the generated period is not directly supported
                 if period.endswith('d') and int(period[:-1]) > 5:
-                    period = "1mo" # For periods like '10d', '15d' etc.
-                elif period.endswith('w'): # If we somehow ended up with 'w'
+                    period = "1mo" 
+                elif period.endswith('w'): 
                     period = "1mo"
                 elif period.endswith('mo') and int(period[:-2]) > 10:
-                    period = "1y" # For periods like '12mo'
+                    period = "1y" 
                 elif period.endswith('y') and int(period[:-1]) > 10:
-                    period = "max" # For very long periods like '15y'
-                # Final fallback if still not valid
+                    period = "max" 
                 if period not in valid_yfinance_periods:
                     period = "1mo" 
 
             st.chat_message("assistant").write(f"Fetching historical data for {ticker} over {period}...")
             tool_output = getHistoricalStockData(ticker, period)
             tool_executed = True
+        elif not tool_executed and re.search(r'\b(historical|past|last week\'s|last\s+(\d+)\s*(day|week|month|year)s?)\b', prompt, re.IGNORECASE) and not re.search(r'\b([A-Z]{2,5})\b', prompt):
+            # If historical data is requested but no ticker is found
+            tool_output = "Please specify a stock ticker symbol (e.g., AAPL, NVDA) for which you want historical data."
+            tool_executed = True
+
 
         # 3. Calculate investment gain/loss
         elif not tool_executed and re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE):
