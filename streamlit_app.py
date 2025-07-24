@@ -895,21 +895,19 @@ def getNews(ticker: str, num_articles: int = 5):
         news_str += f"{i+1}. {link}\n"
     return news_str
 
-# === Gemini API Integration ===
-# Configure the Gemini API client
+# === DeepSeek API Integration ===
+# Configure the DeepSeek API client
 # Use environment variables for API key
-genai_api_key = os.getenv("GEMINI_API_KEY")
-if not genai_api_key:
-    st.error("GEMINI_API_KEY environment variable not set. Please set it in your `.env` file or Streamlit secrets.")
+deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
+
+if not deepseek_api_key or not deepseek_base_url:
+    st.error("DEEPSEEK_API_KEY or DEEPSEEK_BASE_URL environment variables not set. Please set them in your `.env` file or Streamlit secrets.")
     st.stop()
 
 # Initialize the generative model
-# Use a specific model that supports tool calling
-# For local testing, you might use a local model or a different endpoint
-# For deployment, ensure the model is accessible and correctly configured
-# For this example, we'll assume a model that supports tool calling, e.g., 'gemini-pro' or 'gemini-1.5-flash'
-# Note: The specific model name might vary based on API updates.
-client = openai.OpenAI(api_key=genai_api_key, base_url="https://api.gemini.ai/v1") # Placeholder base_url, adjust if needed
+# Use a specific model that supports tool calling (DeepSeek Chat)
+client = openai.OpenAI(api_key=deepseek_api_key, base_url=deepseek_base_url)
 
 # Define the tools available to the model
 tools = [
@@ -1152,7 +1150,7 @@ def run_conversation(messages):
     # First, send user message and available tools to the model
     try:
         response = client.chat.completions.create(
-            model="gemini-1.5-flash", # Use a model that supports tool calling
+            model="deepseek-chat", # Changed model to deepseek-chat
             messages=messages,
             tools=tools,
             tool_choice="auto", # Allow the model to decide whether to call a tool
@@ -1173,7 +1171,7 @@ def run_conversation(messages):
                         # Parse arguments from the tool_call.function.arguments (which is a string)
                         # The fix is here: access arguments as a dictionary key, not an attribute
                         function_args = json.loads(tool_call.function.arguments)
-                        st.write(f"Tool: {function_name}")
+                        st.write(f"Tool: {function_name}") # Removed the lone 'T'
                         tool_output = function_to_call(**function_args)
                         st.write("Tool Output:")
                         st.write(tool_output)
@@ -1221,7 +1219,7 @@ def run_conversation(messages):
             
             # Get a new response from the model after tool execution
             second_response = client.chat.completions.create(
-                model="gemini-1.5-flash",
+                model="deepseek-chat", # Changed model to deepseek-chat
                 messages=messages,
             )
             return second_response.choices[0].message
@@ -1230,7 +1228,7 @@ def run_conversation(messages):
             return response_message
 
     except openai.APIError as e:
-        st.error(f"OpenAI API Error: {e}")
+        st.error(f"DeepSeek API Error: {e}") # Changed error message
         return {"role": "assistant", "content": f"An API error occurred: {e}"}
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
