@@ -749,9 +749,10 @@ def run_conversation(current_chat_history): # current_chat_history is st.session
 
 
             # Append the AI's tool call message (converted to a simple dict) to current_chat_history
+            # Ensure content is None when tool_calls are present
             current_chat_history.append({
                 "role": response_message.role,
-                "content": None, # Ensure content is None for tool_calls messages
+                "content": None,
                 "tool_calls": [ # Store tool_calls info in a serializable dict format
                     {
                         "id": tc.id,
