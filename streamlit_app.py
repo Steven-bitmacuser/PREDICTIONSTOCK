@@ -534,28 +534,47 @@ def getRealtimeStockData(ticker: str):
         data = stock.info
         if not data:
             return f"No data found for ticker '{ticker}'."
+        
+        # Safely get data, defaulting to None if key not present
         price = data.get('regularMarketPrice')
         open_price = data.get('regularMarketOpen')
         day_high = data.get('regularMarketDayHigh')
         day_low = data.get('regularMarketLow')
         volume = data.get('regularMarketVolume')
         market_time_ts = data.get('regularMarketTime')
-        if price is None:
-            return f"Price data not available for '{ticker}'."
+
+        # Format values, handling None types explicitly
+        price_str = f"${price:.2f}" if price is not None else "N/A"
+        open_price_str = f"${open_price:.2f}" if open_price is not None else "N/A"
+        day_high_str = f"${day_high:.2f}" if day_high is not None else "N/A"
+        day_low_str = f"${day_low:.2f}" if day_low is not None else "N/A"
+        
+        # Handle volume separately as it's an integer and needs comma formatting
+        if volume is not None:
+            try:
+                volume_str = f"{int(volume):,} shares"
+            except (ValueError, TypeError):
+                volume_str = "N/A"
+        else:
+            volume_str = "N/A"
+        
         if market_time_ts:
             dt = datetime.fromtimestamp(market_time_ts, pytz.utc).astimezone(pytz.timezone('America/New_York'))
             time_str = dt.strftime("%Y-%m-%d %I:%M %p %Z")
         else:
             time_str = "N/A"
+        
         return (
             f"**Real-time data for {ticker.upper()}:**\n\n"
-            f"**Current Price:** ${price:.2f}\n"
-            f"**Today's Range:** ${day_low:.2f} - ${day_high:.2f}\n"
-            f"**Opening Price:** ${open_price:.2f}\n"
-            f"**Trading Volume:** {volume:,} shares\n"
+            f"**Current Price:** {price_str}\n"
+            f"**Today's Range:** {day_low_str} - {day_high_str}\n"
+            f"**Opening Price:** {open_price_str}\n"
+            f"**Trading Volume:** {volume_str}\n"
             f"**Last Updated:** {time_str}"
         )
     except Exception as e:
+        # Log the full traceback for debugging
+        logging.error(f"Error fetching real-time data for {ticker}: {e}", exc_info=True)
         return f"Error fetching real-time data for {ticker}: {e}"
 
 def getHistoricalStockData(ticker: str, period: str = "1mo"):
@@ -688,14 +707,6 @@ tools = [
                     "ticker": {
                         "type": "string",
                         "description": "Stock ticker symbol."
-                    },
-                    "amount_usd": {
-                        "type": "number",
-                        "description": "Amount invested in USD."
-                    },
-                    "months_ago": {
-                        "type": "integer",
-                        "description": "Number of months ago the investment was made (default 1)."
                     }
                 },
                 "required": ["ticker", "amount_usd"]
@@ -797,93 +808,82 @@ def chatbot_app():
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.chat_message("user").markdown(prompt) # Display immediately
 
-        # Flag to check if a tool was executed
-        tool_executed = False
-        tool_output = None
-        tool_summary_for_ai = "" # New variable to hold summary for AI
+        # Variables to store tool results
+        tool_output_to_display = None # This will be the string displayed to the user
+        tool_summary_for_ai_prompt = "" # This will be added to the AI's prompt for summarization
 
         # --- 0. Generic Ticker Extraction ---
-        # Try to find a ticker symbol (2-5 uppercase letters) anywhere in the prompt
         ticker_match = re.search(r'\b([A-Z]{2,5})\b', prompt)
         extracted_ticker = ticker_match.group(1).upper() if ticker_match else None
 
-        # --- Check for follow-up ticker for historical data ---
-        # If we were waiting for a ticker AND the current prompt is just a ticker
+        # --- Attempt to execute tools in order of priority ---
+        # 1. Handle follow-up ticker for historical data
         if st.session_state.waiting_for_ticker and extracted_ticker and len(prompt.strip()) == len(extracted_ticker):
             st.chat_message("assistant").write(f"Fetching historical data for {extracted_ticker} over {st.session_state.last_requested_period}...")
-            raw_tool_output, summary_stats = getHistoricalStockData(extracted_ticker, st.session_state.last_requested_period)
-            tool_output = raw_tool_output
-            if summary_stats:
-                tool_summary_for_ai = (
-                    f"The user has been provided with historical stock data for {extracted_ticker} for the period {st.session_state.last_requested_period}.\n"
-                    f"Key facts from this data:\n"
-                    f"- Last closing price: ${summary_stats.get('last_close', 'N/A'):.2f}\n"
-                    f"- Highest price in this period: ${summary_stats.get('period_high', 'N/A'):.2f}\n"
-                    f"- Lowest price in this period: ${summary_stats.get('period_low', 'N/A'):.2f}\n"
-                    f"- Total trading volume in this period: {summary_stats.get('period_volume', 'N/A'):,.0f} shares\n"
-                    f"- Overall price change for the period: {summary_stats.get('overall_change', 'N/A')} ({summary_stats.get('overall_percent_change', 'N/A')})\n"
-                    f"Please provide a concise, conversational summary or analysis of this data. Do NOT regenerate the table or invent any numbers. Refer ONLY to the facts provided or general market trends relevant to the provided data."
-                )
-            tool_executed = True
+            raw_output, summary_stats = getHistoricalStockData(extracted_ticker, st.session_state.last_requested_period)
+            tool_output_to_display = raw_output
+            if "Error fetching" not in raw_output and "No historical data" not in raw_output:
+                if summary_stats:
+                    tool_summary_for_ai_prompt = (
+                        f"The user has been provided with historical stock data for {extracted_ticker} for the period {st.session_state.last_requested_period}.\n"
+                        f"Key facts from this data:\n"
+                        f"- Last closing price: ${summary_stats.get('last_close', 'N/A'):.2f}\n"
+                        f"- Highest price in this period: ${summary_stats.get('period_high', 'N/A'):.2f}\n"
+                        f"- Lowest price in this period: ${summary_stats.get('period_low', 'N/A'):.2f}\n"
+                        f"- Total trading volume in this period: {summary_stats.get('period_volume', 'N/A'):,.0f} shares\n"
+                        f"- Overall price change for the period: {summary_stats.get('overall_change', 'N/A')} ({summary_stats.get('overall_percent_change', 'N/A')})\n"
+                        f"Please provide a concise, conversational summary or analysis of this data. Do NOT regenerate the table or invent any numbers. Refer ONLY to the facts provided or general market trends relevant to the provided data."
+                    )
             st.session_state.waiting_for_ticker = False # Reset flag
 
-        # --- If not a follow-up, proceed with normal intent recognition ---
-        if not tool_executed:
-            # 1. Real-time stock data
-            if extracted_ticker and re.search(r'\b(price|current|now|real-time)\b', prompt, re.IGNORECASE):
-                st.chat_message("assistant").write(f"Fetching real-time data for {extracted_ticker}...")
-                tool_output = getRealtimeStockData(extracted_ticker)
-                tool_executed = True
-            
-            # 2. Historical stock data (Initial request)
-            historical_keywords_pattern = re.compile(r'\b(historical|past|last week\'s|last\s+(\d+)\s*(day|week|month|year)s?|data|price)\b', re.IGNORECASE)
-            
-            if not tool_executed and historical_keywords_pattern.search(prompt):
-                if extracted_ticker:
-                    ticker = extracted_ticker # Use the already extracted ticker
+        # 2. Real-time stock data (if not handled by follow-up)
+        elif extracted_ticker and re.search(r'\b(price|current|now|real-time)\b', prompt, re.IGNORECASE):
+            st.chat_message("assistant").write(f"Fetching real-time data for {extracted_ticker}...")
+            tool_output_to_display = getRealtimeStockData(extracted_ticker)
+            if "Error fetching" in tool_output_to_display or "No data found" in tool_output_to_display:
+                # If real-time data failed, clear output and try historical or search
+                tool_output_to_display = None 
+            else:
+                # If successful, prepare summary for AI
+                tool_summary_for_ai_prompt = (
+                    f"The user has been provided with real-time stock data for {extracted_ticker}.\n"
+                    f"Please provide a concise, conversational summary or analysis of this data. Do NOT regenerate the table or invent any numbers. Refer ONLY to the facts provided or general market trends relevant to the provided data."
+                )
 
-                    period = "1mo" # Default period if no specific duration is found
+        # 3. Historical stock data (Initial request, if not handled by follow-up or real-time)
+        historical_keywords_pattern = re.compile(r'\b(historical|past|last week\'s|last\s+(\d+)\s*(day|week|month|year)s?|data|price)\b', re.IGNORECASE)
+        
+        if tool_output_to_display is None and historical_keywords_pattern.search(prompt):
+            if extracted_ticker:
+                ticker = extracted_ticker
+                period = "1mo"
+                period_match_specific = re.search(r'last\s+(\d+)\s*(day|week|month|year)s?', prompt, re.IGNORECASE)
+                if "last week's" in prompt.lower() or "last week" in prompt.lower():
+                    period = "5d"
+                elif period_match_specific:
+                    num = int(period_match_specific.group(1))
+                    unit = period_match_specific.group(2).lower()
+                    if unit == 'day': period = f"{num}d"
+                    elif unit == 'week': period = f"{num*5}d"
+                    elif unit == 'month': period = f"{num}mo"
+                    elif unit == 'year': period = f"{num}y"
+                valid_yfinance_periods = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
+                if period not in valid_yfinance_periods:
+                    if period.endswith('d') and int(period[:-1]) > 5: period = "1mo"
+                    elif period.endswith('w'): period = "1mo"
+                    elif period.endswith('mo') and int(period[:-2]) > 10: period = "1y"
+                    elif period.endswith('y') and int(period[:-1]) > 10: period = "max"
+                    if period not in valid_yfinance_periods: period = "1mo"
 
-                    # More flexible period extraction
-                    period_match_specific = re.search(r'last\s+(\d+)\s*(day|week|month|year)s?', prompt, re.IGNORECASE)
-                    if "last week's" in prompt.lower() or "last week" in prompt.lower():
-                        period = "5d" # 5 trading days for "last week"
-                    elif period_match_specific:
-                        num = int(period_match_specific.group(1))
-                        unit = period_match_specific.group(2).lower()
-                        if unit == 'day':
-                            period = f"{num}d"
-                        elif unit == 'week':
-                            calculated_days = num * 5
-                            if calculated_days <= 60: 
-                                period = f"{calculated_days}d"
-                            else:
-                                period = "3mo" # Fallback for longer week periods
-                        elif unit == 'month':
-                            period = f"{num}mo"
-                        elif unit == 'year':
-                            period = f"{num}y"
-                    
-                    # Ensure period is one of the valid yfinance periods if it's not already
-                    valid_yfinance_periods = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
-                    if period not in valid_yfinance_periods:
-                        if period.endswith('d') and int(period[:-1]) > 5:
-                            period = "1mo" 
-                        elif period.endswith('w'): 
-                            period = "1mo"
-                        elif period.endswith('mo') and int(period[:-2]) > 10:
-                            period = "1y" 
-                        elif period.endswith('y') and int(period[:-1]) > 10:
-                            period = "max" 
-                        if period not in valid_yfinance_periods:
-                            period = "1mo" 
-
-                    st.chat_message("assistant").write(f"Fetching historical data for {ticker} over {period}...")
-                    raw_tool_output, summary_stats = getHistoricalStockData(ticker, period)
-                    tool_output = raw_tool_output
+                st.chat_message("assistant").write(f"Fetching historical data for {ticker} over {period}...")
+                raw_output, summary_stats = getHistoricalStockData(ticker, period)
+                tool_output_to_display = raw_output
+                if "Error fetching" in raw_output or "No historical data" in raw_output:
+                    tool_output_to_display = None # Clear output if error/no data
+                else:
                     if summary_stats:
-                        tool_summary_for_ai = (
-                            f"The user has been provided with historical stock data for {ticker} for the period {period}.\n"
+                        tool_summary_for_ai_prompt = (
+                            f"The user has been provided with historical stock data for {extracted_ticker} for the period {period}.\n"
                             f"Key facts from this data:\n"
                             f"- Last closing price: ${summary_stats.get('last_close', 'N/A'):.2f}\n"
                             f"- Highest price in this period: ${summary_stats.get('period_high', 'N/A'):.2f}\n"
@@ -892,109 +892,72 @@ def chatbot_app():
                             f"- Overall price change for the period: {summary_stats.get('overall_change', 'N/A')} ({summary_stats.get('overall_percent_change', 'N/A')})\n"
                             f"Please provide a concise, conversational summary or analysis of this data. Do NOT regenerate the table or invent any numbers. Refer ONLY to the facts provided or general market trends relevant to the provided data."
                         )
-                    tool_executed = True
+            else:
+                tool_output_to_display = "Please specify a stock ticker symbol (e.g., AAPL, NVDA) for which you want historical data."
+                st.session_state.waiting_for_ticker = True
+                period_match_specific = re.search(r'last\s+(\d+)\s*(day|week|month|year)s?', prompt, re.IGNORECASE)
+                if "last week's" in prompt.lower() or "last week" in prompt.lower():
+                    st.session_state.last_requested_period = "5d"
+                elif period_match_specific:
+                    num = int(period_match_specific.group(1))
+                    unit = period_match_specific.group(2).lower()
+                    if unit == 'day': st.session_state.last_requested_period = f"{num}d"
+                    elif unit == 'week': st.session_state.last_requested_period = f"{num*5}d"
+                    elif unit == 'month': st.session_state.last_requested_period = f"{num}mo"
+                    elif unit == 'year': st.session_state.last_requested_period = f"{num}y"
                 else:
-                    # If historical data is requested but no ticker is found
-                    tool_output = "Please specify a stock ticker symbol (e.g., AAPL, NVDA) for which you want historical data."
-                    st.session_state.waiting_for_ticker = True # Set flag to wait for ticker
-                    # Store the period if identified, so we can use it on follow-up
-                    period_match_specific = re.search(r'last\s+(\d+)\s*(day|week|month|year)s?', prompt, re.IGNORECASE)
-                    if "last week's" in prompt.lower() or "last week" in prompt.lower():
-                        st.session_state.last_requested_period = "5d"
-                    elif period_match_specific:
-                        num = int(period_match_specific.group(1))
-                        unit = period_match_specific.group(2).lower()
-                        if unit == 'day': st.session_state.last_requested_period = f"{num}d"
-                        elif unit == 'week': st.session_state.last_requested_period = f"{num*5}d" # Convert weeks to days for period
-                        elif unit == 'month': st.session_state.last_requested_period = f"{num}mo"
-                        elif unit == 'year': st.session_state.last_requested_period = f"{num}y"
-                    else:
-                        st.session_state.last_requested_period = "1mo" # Default if no period specified
-                    tool_executed = True # Mark as executed to prevent fallback to general search
+                    st.session_state.last_requested_period = "1mo"
+        
+        # 4. Calculate investment gain/loss (if not handled by above)
+        if tool_output_to_display is None and extracted_ticker and re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b', prompt, re.IGNORECASE):
+            amount_match = re.search(r'\b(\d+)\b', prompt)
+            if amount_match:
+                amount = float(amount_match.group(1))
+                months_ago_match = re.search(r'(\d+)\s*(month|year)s?\s*ago', prompt, re.IGNORECASE)
+                months_ago = 1
+                if months_ago_match:
+                    num = int(months_ago_match.group(1))
+                    unit = months_ago_match.group(2).lower()
+                    if unit == 'year': months_ago = num * 12
+                    else: months_ago = num
+                st.chat_message("assistant").write(f"Calculating investment gain/loss for ${amount} in {extracted_ticker} {months_ago} months ago...")
+                tool_output_to_display = calculateInvestmentGainLoss(extracted_ticker, amount, months_ago)
+                if "Error calculating" in tool_output_to_display or "Not enough data" in tool_output_to_display:
+                    tool_output_to_display = None
+            else:
+                tool_output_to_display = "Please specify the amount invested (e.g., 'invested $1000 in AAPL')."
+        
+        elif tool_output_to_display is None and re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b', prompt, re.IGNORECASE) and not extracted_ticker:
+            tool_output_to_display = "Please specify a stock ticker symbol (e.g., AAPL, NVDA) for which you want to calculate investment gain/loss."
 
 
-            # 3. Calculate investment gain/loss
-            # Check for investment keywords AND if a ticker was extracted
-            elif not tool_executed and extracted_ticker and re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b', prompt, re.IGNORECASE):
-                amount_match = re.search(r'\b(\d+)\b', prompt)
-                if amount_match:
-                    amount = float(amount_match.group(1))
-                    months_ago_match = re.search(r'(\d+)\s*(month|year)s?\s*ago', prompt, re.IGNORECASE)
-                    months_ago = 1
-                    if months_ago_match:
-                        num = int(months_ago_match.group(1))
-                        unit = months_ago_match.group(2).lower()
-                        if unit == 'year':
-                            months_ago = num * 12
-                        else:
-                            months_ago = num
-                    st.chat_message("assistant").write(f"Calculating investment gain/loss for ${amount} in {extracted_ticker} {months_ago} months ago...")
-                    tool_output = calculateInvestmentGainLoss(extracted_ticker, amount, months_ago)
-                    tool_executed = True
-                else: # If amount not found but investment keywords are
-                    tool_output = "Please specify the amount invested (e.g., 'invested $1000 in AAPL')."
-                    tool_executed = True
-            elif not tool_executed and re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b', prompt, re.IGNORECASE) and not extracted_ticker:
-                tool_output = "Please specify a stock ticker symbol (e.g., AAPL, NVDA) for which you want to calculate investment gain/loss."
-                tool_executed = True
-
-            # 4. General web search (if no other tool matches)
-            if not tool_executed: # This ensures it's a fallback
-                st.chat_message("assistant").write(f"Searching the web for: '{prompt}'...")
-                # Pass extracted_ticker to GoogleSearchAndBrowse for better relevance
-                tool_output = GoogleSearchAndBrowse(prompt, max_results=5, target_ticker=extracted_ticker) 
-                tool_executed = True
-
-        if tool_executed:
-            # Append tool output to history and display it
-            st.session_state.messages.append({"role": "assistant", "content": tool_output})
-            with st.chat_message("assistant"):
-                st.markdown(tool_output)
+        # 5. General web search (ultimate fallback if no other tool provided data)
+        if tool_output_to_display is None:
+            st.chat_message("assistant").write(f"Searching the web for: '{prompt}'...")
+            tool_output_to_display = GoogleSearchAndBrowse(prompt, max_results=5, target_ticker=extracted_ticker) 
+        
+        # Display the tool's output to the user
+        st.session_state.messages.append({"role": "assistant", "content": tool_output_to_display})
+        with st.chat_message("assistant"):
+            st.markdown(tool_output_to_display)
+        
+        # Now, send the full history (including user prompt and tool output) to DeepSeek
+        # for a conversational response based on the tool's output.
+        with st.spinner("Thinking..."):
+            temp_messages_for_ai = list(st.session_state.messages)
             
-            # Now, send the full history (including user prompt and tool output) to DeepSeek
-            # for a conversational response based on the tool's output.
-            with st.spinner("Thinking..."):
-                # Create a temporary message list for DeepSeek to guide its response
-                temp_messages_for_ai = list(st.session_state.messages) # Copy current history
-                
-                # Add a specific instruction to the AI to prevent hallucination of tables
-                # Use tool_summary_for_ai if available, otherwise a generic instruction
-                if tool_summary_for_ai:
-                    temp_messages_for_ai.append({
-                        "role": "user",
-                        "content": tool_summary_for_ai
-                    })
-                else:
-                    temp_messages_for_ai.append({
-                        "role": "user",
-                        "content": "The previous assistant message contains the direct data requested. Please provide a brief, conversational summary or analysis of this data. Do NOT regenerate the table or list the raw data again. Focus on trends, significant changes, or context."
-                    })
+            if tool_summary_for_ai_prompt:
+                temp_messages_for_ai.append({
+                    "role": "user",
+                    "content": tool_summary_for_ai_prompt
+                })
+            else:
+                temp_messages_for_ai.append({
+                    "role": "user",
+                    "content": "The previous assistant message contains the direct data requested. Please provide a brief, conversational summary or analysis of this data. Do NOT regenerate the table or list the raw data again. Focus on trends, significant changes, or context."
+                })
 
-                assistant_response_dict = run_conversation(temp_messages_for_ai)
-                st.session_state.messages.append(assistant_response_dict) # Append the actual AI response to the main history
-                with st.chat_message(assistant_response_dict["role"]):
-                    st.markdown(assistant_response_dict["content"])
-        # No else block here, as tool_executed is always True due to the final fallback search
-        # This ensures a response is always generated.
-
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("#### About")
-    st.sidebar.info(
-        "This chatbot can fetch real-time and historical stock data, calculate investment returns, "
-        "and browse the web for general financial information using DeepSeek AI and Google Search."
-    )
-
-
-# --- Main Streamlit App Layout ---
-st.set_page_config(page_title="Financial AI Suite", layout="wide")
-
-st.sidebar.title("Choose Your Mode")
-selected_mode = st.sidebar.radio(
-    "Select an application:",
-    ("Stock Price Predictor", "Financial Chatbot")
-)
-
-if selected_mode == "Stock Price Predictor":
-    predictor_app()
-elif selected_mode == "Financial Chatbot":
-    chatbot_app()
+            assistant_response_dict = run_conversation(temp_messages_for_ai)
+            st.session_state.messages.append(assistant_response_dict)
+            with st.chat_message(assistant_response_dict["role"]):
+                st.markdown(assistant_response_dict["content"])
