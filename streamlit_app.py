@@ -1171,7 +1171,7 @@ def run_conversation(messages):
                         # Parse arguments from the tool_call.function.arguments (which is a string)
                         # The fix is here: access arguments as a dictionary key, not an attribute
                         function_args = json.loads(tool_call.function.arguments)
-                        st.write(f"Tool: {function_name}") # Removed the lone 'T'
+                        st.write(f"Tool: {function_name}")
                         tool_output = function_to_call(**function_args)
                         st.write("Tool Output:")
                         st.write(tool_output)
@@ -1237,8 +1237,24 @@ def run_conversation(messages):
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Ask Your Financial Questions", page_icon="📈")
-st.title("Ask Your Financial Questions")
+st.title("Financial Analysis App")
 
+# --- Stock Chart Image Predictor Section ---
+st.header("Stock Chart Image Predictor")
+with st.expander("Upload a stock chart image for prediction"):
+    uploaded_file = st.file_uploader("Upload a stock chart image (.png, .jpg, .jpeg)", type=["png", "jpg", "jpeg"])
+    ticker_input_predictor = st.text_input("Enter stock ticker (e.g., TSLA) for image analysis:", key="ticker_predictor")
+    
+    if st.button("Analyze Chart"):
+        if uploaded_file and ticker_input_predictor:
+            run_analysis_streamlit(uploaded_file, ticker_input_predictor.upper())
+        else:
+            st.warning("Please upload an image and enter a stock ticker to analyze the chart.")
+
+st.markdown("---") # Separator
+
+# --- Financial Chatbot Section ---
+st.header("Financial Chatbot")
 st.write("Hello! I'm your financial chatbot. How can I assist you today?")
 
 # Initialize chat history in session state
