@@ -491,7 +491,7 @@ def browse_page(url):
         print(f"❌ Browsing error: {e}")
         return None
 
-def GoogleSearchAndBrowse(query, max_results=3): # Added max_results parameter
+def GoogleSearchAndBrowse(query, max_results=5, target_ticker=None): # Increased max_results and added target_ticker
     google_api_key = os.getenv("GOOGLE_API_KEY")
     google_cse_id = os.getenv("GOOGLE_CSE_ID")
     if not google_api_key or not google_cse_id:
@@ -499,19 +499,28 @@ def GoogleSearchAndBrowse(query, max_results=3): # Added max_results parameter
 
     current_time_pacific = get_pacific_time()
     query_with_time = f"{query} as of {current_time_pacific}"
+    
+    # Enhance query if a target ticker is provided
+    if target_ticker:
+        query_with_time = f"{target_ticker} stock {query_with_time}"
 
-    # Get multiple search results
     results = google_search_chatbot(query_with_time, google_api_key, google_cse_id, num=max_results)
     
     if not results:
         return f"🕸️ No Google search results found for query: '{query_with_time}'."
     
-    # Iterate through results and try to browse until content is found
+    # Iterate through results and try to browse until relevant content is found
     for i, result in enumerate(results):
         url = result.get('link')
         if url:
             content = browse_page(url)
             if content:
+                # Basic relevance check: does the content mention the target ticker if one was provided?
+                if target_ticker and target_ticker.lower() not in content.lower() and \
+                   f"{target_ticker} stock".lower() not in content.lower():
+                    logging.info(f"Skipping irrelevant search result {url} (missing ticker: {target_ticker})")
+                    continue # Skip to the next URL if ticker not found in content
+
                 return f"Search Result for '{query_with_time}' (Source {i+1}/{len(results)}):\nSource: {url}\nContent: {content}"
         
     return f"Could not retrieve relevant content from any of the top {max_results} search results for query: '{query_with_time}'."
@@ -838,7 +847,8 @@ def chatbot_app():
         # 4. General web search (if no other tool matches)
         if not tool_executed: # This ensures it's a fallback
             st.chat_message("assistant").write(f"Searching the web for: '{prompt}'...")
-            tool_output = GoogleSearchAndBrowse(prompt, max_results=5) # Try up to 5 results
+            # Pass extracted_ticker to GoogleSearchAndBrowse for better relevance
+            tool_output = GoogleSearchAndBrowse(prompt, max_results=5, target_ticker=extracted_ticker) 
             tool_executed = True
 
         if tool_executed:
