@@ -290,7 +290,7 @@ def adjust_prediction_with_news(y_values, news_items):
 
 
 # --- news_service.py content (unchanged) ---
-def search_news(query, api_key, cse_id, num_results=15):
+def search_news(query, api_key, cse_id, num_results=5):
     url = "https://www.googleapis.com/customsearch/v1"
     params = {"q": f"{query} stock financial news OR earnings OR analyst ratings OR market outlook", "cx": cse_id,
               "key": api_key, "num": num_results}
