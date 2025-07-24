@@ -497,7 +497,11 @@ def GoogleSearchAndBrowse(query):
     if not google_api_key or not google_cse_id:
         return "Error: Google API keys not configured for browsing."
 
-    results = google_search_chatbot(query, google_api_key, google_cse_id, num=1)
+    # Include Pacific time in the search query
+    current_time_pacific = get_pacific_time()
+    query_with_time = f"{query} as of {current_time_pacific}"
+
+    results = google_search_chatbot(query_with_time, google_api_key, google_cse_id, num=1)
     if not results:
         return "🕸️ No Google search results found."
     url = results[0].get('link')
@@ -794,12 +798,16 @@ def run_conversation(current_chat_history): # current_chat_history is st.session
                     timeout=120.0
                 )
                 # Return the final assistant message as a simple dictionary
-                return {"role": second_response.choices[0].message.role, "content": second_response.choices[0].message.content}
+                final_assistant_message = {"role": second_response.choices[0].message.role, "content": second_response.choices[0].message.content}
+                current_chat_history.append(final_assistant_message) # Append the final message to history
+                return final_assistant_message
             else:
                 return {"role": "assistant", "content": f"Error: Tool '{function_name}' not found."}
         else:
             # Return the assistant message as a simple dictionary
-            return {"role": response_message.role, "content": response_message.content if response_message.content is not None else ""}
+            final_assistant_message = {"role": response_message.role, "content": response_message.content if response_message.content is not None else ""}
+            current_chat_history.append(final_assistant_message) # Append the final message to history
+            return final_assistant_message
     except openai.APITimeoutError:
         return {"role": "assistant", "content": "The AI request timed out. Please try again."}
     except Exception as e:
