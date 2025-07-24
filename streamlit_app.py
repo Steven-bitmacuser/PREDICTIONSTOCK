@@ -537,9 +537,9 @@ def getRealtimeStockData(ticker: str):
         
         # Safely get data, defaulting to None if key not present
         price = data.get('regularMarketPrice')
-        open_price = data.get('regularMarketOpen')
+        open_price = data.get('regularMarketMarketOpen') # Corrected key
         day_high = data.get('regularMarketDayHigh')
-        day_low = data.get('regularMarketLow')
+        day_low = data.get('regularMarketDayLow')
         volume = data.get('regularMarketVolume')
         market_time_ts = data.get('regularMarketTime')
 
