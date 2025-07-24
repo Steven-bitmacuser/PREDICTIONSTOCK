@@ -526,13 +526,12 @@ def getRealtimeStockData(ticker: str):
         else:
             time_str = "N/A"
         return (
-            f"Real-time data for {ticker.upper()}:\n"
-            f"- Price: ${price:.2f}\n"
-            f"- Open: ${open_price:.2f}\n"
-            f"- High: ${day_high:.2f}\n"
-            f"- Low: ${day_low:.2f}\n"
-            f"- Volume: {volume:,}\n"
-            f"- Last Updated: {time_str}"
+            f"**Real-time data for {ticker.upper()}:**\n\n"
+            f"**Current Price:** ${price:.2f}\n"
+            f"**Today's Range:** ${day_low:.2f} - ${day_high:.2f}\n"
+            f"**Opening Price:** ${open_price:.2f}\n"
+            f"**Trading Volume:** {volume:,} shares\n"
+            f"**Last Updated:** {time_str}"
         )
     except Exception as e:
         return f"Error fetching real-time data for {ticker}: {e}"
