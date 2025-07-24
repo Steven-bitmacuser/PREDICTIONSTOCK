@@ -106,7 +106,7 @@ def extract_price_curve(image):
         inverted_left_roi = cv2.bitwise_not(gray_left_roi)
         _, ocr_thresh_left = cv2.threshold(inverted_left_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         ocr_data_left = pytesseract.image_to_data(ocr_thresh_left, output_type=pytesseract.Output.DICT,
-                                                   config='--psm 6')
+                                                     config='--psm 6')
         potential_y_axes_data.append((ocr_data_left, y_axis_roi_y_start, "left"))
 
     right_roi = image_cv[y_axis_roi_y_start:y_axis_roi_y_end, right_y_axis_roi_x_start:right_y_axis_roi_x_end]
@@ -312,13 +312,13 @@ def analyze_news(news_links, api_key, base_url):
         return {"overall_summary": "No news links provided for analysis.", "news_items": []}
     client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=120.0)
     prompt = (
-                "Analyze the sentiment and importance of the following news links regarding a stock.\\n\\n" +
-                "\\n".join(news_links) +
-                "\\n\\nFor each news item, provide:\\n"
-                "- sentiment: 'positive', 'neutral', or 'negative'.\\n"
-                "- importance: A score from 0.0 (low) to 1.0 (high).\\n"
-                "- explanation: A detailed summary of why this sentiment and importance were assigned.\\n\\n"
-                "Return the result as a JSON object with two keys: 'overall_summary' (a concise string summarizing the collective sentiment and key themes from all analyzed news links) and 'news_items' (a list of objects, each with 'sentiment', 'importance', and 'explanation'). DO NOT include any other text, conversational elements, or markdown formatting outside the JSON object. ONLY the JSON object.\\nFor example: "
+                "Analyze the sentiment and importance of the following news links regarding a stock.\n\n" +
+                "\n".join(news_links) +
+                "\n\nFor each news item, provide:\n"
+                "- sentiment: 'positive', 'neutral', or 'negative'.\n"
+                "- importance: A score from 0.0 (low) to 1.0 (high).\n"
+                "- explanation: A detailed summary of why this sentiment and importance were assigned.\n\n"
+                "Return the result as a JSON object with two keys: 'overall_summary' (a concise string summarizing the collective sentiment and key themes from all analyzed news links) and 'news_items' (a list of objects, each with 'sentiment', 'importance', and 'explanation'). DO NOT include any other text, conversational elements, or markdown formatting outside the JSON object. ONLY the JSON object.\nFor example: "
                 '{"overall_summary": "Overall summary of news...", "news_items": [{"sentiment": "positive", "importance": 0.8, "explanation": "..."}, {"sentiment": "neutral", "importance": 0.6, "explanation": "..."}]}'
     )
     logging.info("Requesting news sentiment analysis from AI... This may take a moment.")
@@ -489,7 +489,7 @@ def browse_page(url):
     set of content-bearing HTML tags.
     """
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -622,227 +622,308 @@ def _scrape_price_from_url(url: str, selector: str, ticker: str, source_name: st
                     cleaned_price_str = cleaned_price_str.replace('.', '').replace(',', '.')
                 else: # Assume US thousands separator
                     cleaned_price_str = cleaned_price_str.replace(',', '')
-            else: # Only commas or only dots, assume standard US format
-                cleaned_price_str = cleaned_price_str.replace(',', '')
-
-            try:
-                price = float(cleaned_price_str)
-                logging.info(f"Scraped price from {source_name} for {ticker}: {price}")
-                return {"price": price, "source": source_name}
-            except ValueError:
-                logging.warning(f"Could not parse price '{price_text}' from {source_name} for {ticker}.")
-                return None
-        else:
-            logging.warning(f"Price element not found on {source_name} for {ticker} using selector '{selector}'.")
-            return None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error scraping {source_name} for {ticker}: {e}")
+            
+            # Ensure proper decimal point
+            cleaned_price_str = cleaned_price_str.replace(',', '') # Remove all commas first
+            price = float(cleaned_price_str)
+            return {"price": price, "source": source_name}
         return None
-    except Exception as e:
-        logging.error(f"Unexpected error scraping {source_name} for {ticker}: {e}")
+    except requests.RequestException as e:
+        logging.warning(f"Failed to scrape {url} for {ticker}: {e}")
         return None
-
+    except ValueError as e:
+        logging.warning(f"Could not parse price from {url} for {ticker}: {e}")
+        return None
 
 def getRealtimeStockData(ticker: str):
     """
-    Get real-time stock data for a ticker symbol.
-    This function will attempt to use YFinance first, then Alpha Vantage,
-    then specific web scraping fallbacks, and finally fall back to a Google Search.
+    Fetches real-time stock data for a given ticker from multiple sources.
+    Prioritizes Alpha Vantage if API key is available, then falls back to scraping.
     """
-    company_name_map = {
-        "600519.SS": "Kweichow Moutai",
-        "NVDA": "NVIDIA Corporation",
-        # Add other common international tickers and their company names here if needed
-    }
-    company_name = company_name_map.get(ticker.upper(), ticker) # Default to ticker if name not found
-
-    # 1. Try YFinance
-    try:
-        stock = yf.Ticker(ticker)
-        data = stock.info
-        if data and data.get('regularMarketPrice') is not None:
-            price = data.get('regularMarketPrice')
-            open_price = data.get('regularMarketOpen')
-            day_high = data.get('regularMarketDayHigh')
-            day_low = data.get('regularMarketLow')
-            volume = data.get('regularMarketVolume')
-            market_time_ts = data.get('regularMarketTime')
-            
-            if market_time_ts:
-                dt = datetime.fromtimestamp(market_time_ts, pytz.utc).astimezone(pytz.timezone('America/New_York'))
-                time_str = dt.strftime("%Y-%m-%d %I:%M %p %Z")
-            else:
-                time_str = "N/A"
-                
-            return (
-                f"**Real-time data for {ticker.upper()} (via YFinance):**\n\n"
-                f"**Current Price:** ${price:.2f}\n"
-                f"**Today's Range:** ${day_low:.2f} - ${day_high:.2f}\n"
-                f"**Opening Price:** ${open_price:.2f}\n"
-                f"**Trading Volume:** {volume:,} shares\n"
-                f"**Last Updated:** {time_str}"
-            )
-        else:
-            st.warning(f"⚠️ YFinance did not return complete real-time data for '{ticker}'. Trying Alpha Vantage...")
-    except Exception as e:
-        st.warning(f"⚠️ An error occurred fetching real-time data for {ticker} from YFinance: {e}. Trying Alpha Vantage...")
-
-    # 2. Try Alpha Vantage
     alpha_vantage_api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
     if alpha_vantage_api_key:
-        av_data = getRealtimeStockData_AlphaVantage(ticker, alpha_vantage_api_key)
-        if av_data and "error" not in av_data:
-            return (
-                f"**Real-time data for {ticker.upper()} (via Alpha Vantage):**\n\n"
-                f"**Current Price:** ${av_data['price']:.2f}\n"
-                f"**Today's Range:** ${av_data['low']:.2f} - ${av_data['high']:.2f}\n"
-                f"**Opening Price:** ${av_data['open']:.2f}\n"
-                f"**Trading Volume:** {av_data['volume']:,} shares\n"
-                f"**Last Updated:** {av_data['time_str']}"
-            )
+        st.info(f"Attempting to fetch real-time data for {ticker} using Alpha Vantage...")
+        data = getRealtimeStockData_AlphaVantage(ticker, alpha_vantage_api_key)
+        if data and "error" not in data:
+            return data
+        elif data and "error" in data:
+            st.warning(f"Alpha Vantage error: {data['error']}. Falling back to web scraping.")
         else:
-            st.warning(f"⚠️ Alpha Vantage did not return complete real-time data for '{ticker}' (Error: {av_data.get('error', 'Unknown')}). Trying web scraping fallbacks...")
-    else:
-        st.warning("⚠️ ALPHA_VANTAGE_API_KEY is not set. Skipping Alpha Vantage lookup.")
+            st.warning("Alpha Vantage returned no data. Falling back to web scraping.")
 
-    # 3. Try specific web scraping fallbacks (Investing.com)
-    st.info(f"Attempting to scrape price from Investing.com for '{ticker}'...")
-    investing_url = f"https://www.investing.com/equities/{ticker.lower()}"
-    # This selector is a common pattern for the main price on Investing.com.
-    # It might need adjustment if Investing.com changes its HTML structure.
-    investing_selector = "div.instrument-price_last span" 
-    investing_data = _scrape_price_from_url(investing_url, investing_selector, ticker, "Investing.com")
-    if investing_data and investing_data["price"] is not None:
-        return (
-            f"**Real-time data for {ticker.upper()} (via Investing.com Scrape):**\n\n"
-            f"**Current Price:** ${investing_data['price']:.2f}\n"
-            f"**Source:** {investing_data['source']} (Scraped)\n"
-            f"*(Note: Web scraping is prone to breaking if website structure changes.)*"
-        )
-    else:
-        st.warning(f"⚠️ Failed to scrape real-time data from Investing.com for '{ticker}'. Trying StockAnalysis.com...")
-
-    # 4. Try specific web scraping fallbacks (StockAnalysis.com)
-    st.info(f"Attempting to scrape price from StockAnalysis.com for '{ticker}'...")
-    stockanalysis_url = f"https://stockanalysis.com/stocks/{ticker.lower()}/"
-    # This selector is a common pattern for the main price on StockAnalysis.com.
-    # It might need adjustment if StockAnalysis.com changes its HTML structure.
-    stockanalysis_selector = "span.s-price" 
-    stockanalysis_data = _scrape_price_from_url(stockanalysis_url, stockanalysis_selector, ticker, "StockAnalysis.com")
-    if stockanalysis_data and stockanalysis_data["price"] is not None:
-        return (
-            f"**Real-time data for {ticker.upper()} (via StockAnalysis.com Scrape):**\n\n"
-            f"**Current Price:** ${stockanalysis_data['price']:.2f}\n"
-            f"**Source:** {stockanalysis_data['source']} (Scraped)\n"
-            f"*(Note: Web scraping is prone to breaking if website structure changes.)*"
-        )
-    else:
-        st.warning(f"⚠️ Failed to scrape real-time data from StockAnalysis.com for '{ticker}'. Falling back to Google Search...")
-
-    # 5. Fallback to Google Search (existing code)
-    st.info(f"Attempting Google Search fallback for '{ticker}'...")
-    search_queries_to_try = [
-        f"real-time stock price {ticker}",
-        f"current stock price {company_name}",
-        f"{company_name} stock price today"
+    st.info(f"Attempting to scrape real-time data for {ticker}...")
+    # Fallback to web scraping if Alpha Vantage fails or is not configured
+    sources = [
+        {"url": f"https://finance.yahoo.com/quote/{ticker}/", "selector": f"fin-qsp-price[data-symbol='{ticker}']", "name": "Yahoo Finance"},
+        {"url": f"https://www.google.com/finance/quote/{ticker}:NASDAQ", "selector": "div[data-source='inline_price']", "name": "Google Finance"},
+        {"url": f"https://www.marketwatch.com/investing/stock/{ticker}", "selector": "bg-quote.value", "name": "MarketWatch"}
     ]
-    
-    for query_attempt in search_queries_to_try:
-        search_result_content = GoogleSearchAndBrowse(query_attempt, num_results=1)
-        
-        # Check if content was retrieved and if it contains "No Google search results found" or "Could not retrieve content"
-        if "No Google search results found" in search_result_content or "Could not retrieve content" in search_result_content:
-            logging.info(f"Google Search for '{query_attempt}' failed to retrieve content. Trying next query.")
-            continue # Try the next query in the list
 
-        # More flexible regex to capture price with or without currency symbols, and commas/dots
-        # This regex tries to capture a number that looks like a price, potentially with thousands separators and decimal points.
-        # It also looks for common currency symbols or abbreviations.
-        price_match = re.search(r'[\$¥€£]?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?)\s*(?:USD|CNY|EUR|GBP|AUD|CAD|JPY|HKD|SGD)?', search_result_content, re.IGNORECASE)
-        
-        if price_match:
-            try:
-                extracted_price_str = price_match.group(1)
-                # Handle cases like "1.234,56" (European format) vs "1,234.56" (US format)
-                if ',' in extracted_price_str and '.' in extracted_price_str:
-                    # If comma is the last separator, assume European decimal
-                    if extracted_price_str.rfind(',') > extracted_price_str.rfind('.'):
-                        extracted_price_str = extracted_price_str.replace('.', '').replace(',', '.')
-                    else: # Assume US thousands separator
-                        extracted_price_str = extracted_price_str.replace(',', '')
-                else: # Only commas or only dots, assume standard US format
-                    extracted_price_str = extracted_price_str.replace(',', '')
+    for source in sources:
+        price_data = _scrape_price_from_url(source["url"], source["selector"], ticker, source["name"])
+        if price_data:
+            return {
+                "price": price_data["price"],
+                "open": "N/A", # Scraped data often doesn't have this detail
+                "high": "N/A",
+                "low": "N/A",
+                "volume": "N/A",
+                "time_str": get_pacific_time(), # Use current time as a proxy
+                "source": price_data["source"]
+            }
+    return {"error": f"Could not retrieve real-time data for {ticker} from any source."}
 
-                extracted_price = float(extracted_price_str)
-                return (
-                    f"**Real-time data for {ticker.upper()} (via Google Search Fallback - Query: '{query_attempt}'):**\n\n"
-                    f"**Current Price:** ${extracted_price:.2f}\n"
-                    f"**Source Content:** {search_result_content[:500]}..." # Show snippet of source
-                )
-            except ValueError:
-                logging.warning(f"Could not parse extracted price '{extracted_price_str}' from Google Search for '{query_attempt}'.")
-                # Continue to next query if parsing fails for this one
-                continue
+
+def getHistoricalStockData(ticker: str, period: str = "1y"):
+    """
+    Fetches historical stock data using yfinance.
+    Period options: "1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"
+    """
+    st.info(f"Fetching historical data for {ticker} for period {period}...")
+    try:
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period=period)
+        if hist.empty:
+            return f"No historical data found for {ticker} for the period {period}."
+        
+        # Format for display
+        hist.index = hist.index.strftime('%Y-%m-%d')
+        hist_df = hist[['Open', 'High', 'Low', 'Close', 'Volume']]
+        hist_df.columns = [f'{ticker} Open', f'{ticker} High', f'{ticker} Low', f'{ticker} Close', f'{ticker} Volume']
+        
+        return hist_df.to_markdown()
+    except Exception as e:
+        return f"Error fetching historical data for {ticker}: {e}"
+
+def getCompanyInfo(ticker: str):
+    """
+    Fetches company information using yfinance.
+    """
+    st.info(f"Fetching company info for {ticker}...")
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        if not info:
+            return f"No company information found for {ticker}."
+        
+        # Extract key information
+        company_summary = {
+            "Symbol": info.get("symbol"),
+            "Long Name": info.get("longName"),
+            "Sector": info.get("sector"),
+            "Industry": info.get("industry"),
+            "Country": info.get("country"),
+            "Full Time Employees": info.get("fullTimeEmployees"),
+            "Market Cap": info.get("marketCap"),
+            "Current Price": info.get("currentPrice"),
+            "Recommendation Key": info.get("recommendationKey"),
+            "Website": info.get("website"),
+            "Business Summary": info.get("longBusinessSummary", "No business summary available.")
+        }
+        
+        # Convert relevant numerical values to readable format
+        if company_summary.get("Market Cap"):
+            company_summary["Market Cap"] = f"${company_summary['Market Cap']:,}"
+        if company_summary.get("Full Time Employees"):
+            company_summary["Full Time Employees"] = f"{company_summary['Full Time Employees']:,}"
+        if company_summary.get("Current Price"):
+            company_summary["Current Price"] = f"${company_summary['Current Price']:.2f}"
+
+        # Format as a readable string
+        info_str = f"**Company Information for {company_summary.get('Long Name', ticker)} ({company_summary.get('Symbol', '')}):**\n"
+        for key, value in company_summary.items():
+            if key not in ["Symbol", "Long Name", "Business Summary"]:
+                info_str += f"- **{key}:** {value}\n"
+        info_str += f"\n**Business Summary:**\n{company_summary['Business Summary']}"
+        
+        return info_str
+    except Exception as e:
+        return f"Error fetching company information for {ticker}: {e}"
+
+def getFinancialStatements(ticker: str, statement_type: str = "income_statement", period: str = "annual"):
+    """
+    Fetches financial statements (income statement, balance sheet, cash flow) for a given ticker.
+    statement_type: "income_statement", "balance_sheet", "cash_flow"
+    period: "annual", "quarterly"
+    """
+    st.info(f"Fetching {period} {statement_type} for {ticker}...")
+    try:
+        stock = yf.Ticker(ticker)
+        
+        if statement_type == "income_statement":
+            data = stock.income_stmt if period == "annual" else stock.quarterly_income_stmt
+        elif statement_type == "balance_sheet":
+            data = stock.balance_sheet if period == "annual" else stock.quarterly_balance_sheet
+        elif statement_type == "cash_flow":
+            data = stock.cashflow if period == "annual" else stock.quarterly_cashflow
         else:
-            logging.info(f"No clear price found in Google Search results for '{query_attempt}'.")
-            # Continue to next query if no price match for this one
-            continue
+            return "Invalid statement type. Choose from 'income_statement', 'balance_sheet', 'cash_flow'."
+
+        if data.empty:
+            return f"No {period} {statement_type} data found for {ticker}."
+        
+        # Transpose for better readability in markdown
+        data = data.T
+        data.index.name = "Date"
+        data.index = data.index.strftime('%Y-%m-%d')
+        
+        return f"**{period.capitalize()} {statement_type.replace('_', ' ').capitalize()} for {ticker}:**\n" + data.to_markdown()
+    except Exception as e:
+        return f"Error fetching financial statements for {ticker}: {e}"
+
+def getMajorHolders(ticker: str):
+    """
+    Fetches major holders information for a given ticker.
+    """
+    st.info(f"Fetching major holders for {ticker}...")
+    try:
+        stock = yf.Ticker(ticker)
+        major_holders = stock.major_holders
+        
+        if major_holders.empty:
+            return f"No major holders data found for {ticker}."
+        
+        major_holders.columns = ['Percentage', 'Description']
+        major_holders_str = f"**Major Holders for {ticker}:**\n" + major_holders.to_markdown(index=False)
+        return major_holders_str
+    except Exception as e:
+        return f"Error fetching major holders for {ticker}: {e}"
+
+def getInstitutionalHolders(ticker: str):
+    """
+    Fetches institutional holders information for a given ticker.
+    """
+    st.info(f"Fetching institutional holders for {ticker}...")
+    try:
+        stock = yf.Ticker(ticker)
+        institutional_holders = stock.institutional_holders
+        
+        if institutional_holders.empty:
+            return f"No institutional holders data found for {ticker}."
+        
+        institutional_holders.columns = ['Holder', 'Shares', 'Date Reported', 'Percentage Out', 'Value']
+        institutional_holders_str = f"**Institutional Holders for {ticker}:**\n" + institutional_holders.to_markdown(index=False)
+        return institutional_holders_str
+    except Exception as e:
+        return f"Error fetching institutional holders for {ticker}: {e}"
+
+def getRecommendations(ticker: str):
+    """
+    Fetches analyst recommendations for a given ticker.
+    """
+    st.info(f"Fetching recommendations for {ticker}...")
+    try:
+        stock = yf.Ticker(ticker)
+        recommendations = stock.recommendations
+        
+        if recommendations.empty:
+            return f"No analyst recommendations found for {ticker}."
+        
+        # Limit to the most recent recommendations for brevity
+        recommendations_str = f"**Analyst Recommendations for {ticker}:**\n" + recommendations.head(10).to_markdown()
+        return recommendations_str
+    except Exception as e:
+        return f"Error fetching analyst recommendations for {ticker}: {e}"
+
+def getDividends(ticker: str):
+    """
+    Fetches dividend history for a given ticker.
+    """
+    st.info(f"Fetching dividend history for {ticker}...")
+    try:
+        stock = yf.Ticker(ticker)
+        dividends = stock.dividends
+        
+        if dividends.empty:
+            return f"No dividend history found for {ticker}."
+        
+        dividends = dividends.reset_index()
+        dividends.columns = ['Date', 'Dividend']
+        dividends['Date'] = dividends['Date'].dt.strftime('%Y-%m-%d')
+        
+        dividends_str = f"**Dividend History for {ticker}:**\n" + dividends.to_markdown(index=False)
+        return dividends_str
+    except Exception as e:
+        return f"Error fetching dividend history for {ticker}: {e}"
+
+def getEarnings(ticker: str):
+    """
+    Fetches earnings history (annual and quarterly) for a given ticker.
+    """
+    st.info(f"Fetching earnings history for {ticker}...")
+    try:
+        stock = yf.Ticker(ticker)
+        
+        annual_earnings = stock.earnings
+        quarterly_earnings = stock.quarterly_earnings
+        
+        response_str = ""
+        if not annual_earnings.empty:
+            annual_earnings = annual_earnings.T
+            annual_earnings.index.name = "Year"
+            annual_earnings.index = annual_earnings.index.astype(str)
+            response_str += f"**Annual Earnings for {ticker}:**\n" + annual_earnings.to_markdown() + "\n\n"
+        else:
+            response_str += f"No annual earnings data found for {ticker}.\n\n"
+            
+        if not quarterly_earnings.empty:
+            quarterly_earnings = quarterly_earnings.T
+            quarterly_earnings.index.name = "Quarter"
+            quarterly_earnings.index = quarterly_earnings.index.strftime('%Y-%m-%d')
+            response_str += f"**Quarterly Earnings for {ticker}:**\n" + quarterly_earnings.to_markdown()
+        else:
+            response_str += f"No quarterly earnings data found for {ticker}."
+            
+        return response_str
+    except Exception as e:
+        return f"Error fetching earnings data for {ticker}: {e}"
+
+def getNews(ticker: str, num_articles: int = 5):
+    """
+    Fetches recent news articles for a given ticker using Google Search.
+    """
+    st.info(f"Searching for recent news for {ticker}...")
+    query = f"{ticker} stock news"
+    news_links = search_news(query, os.getenv("GOOGLE_API_KEY"), os.getenv("GOOGLE_CSE_ID"), num_results=num_articles)
     
-    # If all fallbacks fail
-    return f"Could not retrieve real-time price for '{ticker}' from YFinance, Alpha Vantage, or Google Search after multiple attempts. Last search result: {search_result_content}"
+    if not news_links:
+        return f"No recent news found for {ticker}."
+    
+    news_str = f"**Recent News for {ticker}:**\n"
+    for i, link in enumerate(news_links):
+        news_str += f"{i+1}. {link}\n"
+    return news_str
 
+# === Gemini API Integration ===
+# Configure the Gemini API client
+# Use environment variables for API key
+genai_api_key = os.getenv("GEMINI_API_KEY")
+if not genai_api_key:
+    st.error("GEMINI_API_KEY environment variable not set. Please set it in your `.env` file or Streamlit secrets.")
+    st.stop()
 
-def getHistoricalStockData(ticker: str, period: str = "1mo"):
-    try:
-        df = yf.download(ticker, period=period, interval="1d", progress=False)
-        if df.empty:
-            return f"No historical data for '{ticker}' for period '{period}'."
-        df.reset_index(inplace=True)
-        tail_df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']].tail()
-        return f"Historical data for {ticker.upper()} ({period}):\n{tail_df.to_string(index=False)}"
-    except Exception as e:
-        return f"Error fetching historical data for {ticker} ({period}): {e}"
+# Initialize the generative model
+# Use a specific model that supports tool calling
+# For local testing, you might use a local model or a different endpoint
+# For deployment, ensure the model is accessible and correctly configured
+# For this example, we'll assume a model that supports tool calling, e.g., 'gemini-pro' or 'gemini-1.5-flash'
+# Note: The specific model name might vary based on API updates.
+client = openai.OpenAI(api_key=genai_api_key, base_url="https://api.gemini.ai/v1") # Placeholder base_url, adjust if needed
 
-
-def calculateInvestmentGainLoss(ticker: str, amount_usd: float, months_ago: int = 1):
-    end_date = datetime.today()
-    start_date = end_date - relativedelta(months=months_ago)
-    try:
-        df = yf.download(ticker, start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'),
-                         progress=False)
-        if df.empty or len(df) < 2:
-            return f"Not enough data for {ticker.upper()} to calculate investment returns."
-        start_price = df.iloc[0]['Close']
-        end_price = df.iloc[-1]['Close']
-        shares = amount_usd / start_price
-        current_value = shares * end_price
-        profit = current_value - amount_usd
-        percent = (profit / amount_usd) * 100
-        return (
-            f"Investment summary for {ticker.upper()} from {start_date.date()} to {end_date.date()}:\n"
-            f"- Buy price: ${start_price:.2f}\n"
-            f"- Current price: ${end_price:.2f}\n"
-            f"- Shares purchased: {shares:.2f}\n"
-            f"- Current value: ${current_value:.2f}\n"
-            f"- {'Gain' if profit > 0 else 'Loss'}: ${abs(profit):.2f} ({percent:.2f}%)"
-        )
-    except Exception as e:
-        return f"Error calculating investment gain/loss for {ticker} ({period}): {e}"
-
-
-# === Tools Definition for Chatbot ===
+# Define the tools available to the model
 tools = [
     {
         "type": "function",
         "function": {
             "name": "getRealtimeStockData",
-            "description": "Get real-time stock data for a ticker symbol. This function will attempt to use YFinance first, then Alpha Vantage, and finally fall back to a Google Search to find the latest price.",
+            "description": "Get real-time stock data for a given stock ticker. This function attempts to fetch data from Alpha Vantage first, and falls back to web scraping if Alpha Vantage fails or is not configured. It returns the current price, open, high, low, volume, and the time of the data.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "ticker": {
                         "type": "string",
-                        "description": "Stock ticker symbol, e.g. AAPL."
+                        "description": "The stock ticker symbol (e.g., 'AAPL' for Apple Inc.)."
                     }
                 },
                 "required": ["ticker"]
@@ -853,17 +934,17 @@ tools = [
         "type": "function",
         "function": {
             "name": "getHistoricalStockData",
-            "description": "Get historical stock data for a ticker symbol over a period.",
+            "description": "Get historical stock data for a given stock ticker and period. Period options: '1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max'.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "ticker": {
                         "type": "string",
-                        "description": "Stock ticker symbol."
+                        "description": "The stock ticker symbol (e.g., 'AAPL' for Apple Inc.)."
                     },
                     "period": {
                         "type": "string",
-                        "description": "Data period, e.g. '1mo', '3mo', '1y'.",
+                        "description": "The period for historical data (e.g., '1y' for one year, '5d' for five days).",
                         "enum": ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
                     }
                 },
@@ -874,25 +955,151 @@ tools = [
     {
         "type": "function",
         "function": {
-            "name": "calculateInvestmentGainLoss",
-            "description": "Calculate investment gain or loss for a stock over a specified number of months.",
+            "name": "getCompanyInfo",
+            "description": "Get general company information for a given stock ticker, including business summary, sector, industry, market cap, and website.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "ticker": {
                         "type": "string",
-                        "description": "Stock ticker symbol."
-                    },
-                    "amount_usd": {
-                        "type": "number",
-                        "description": "Amount invested in USD."
-                    },
-                    "months_ago": {
-                        "type": "integer",
-                        "description": "Number of months ago the investment was made (default 1)."
+                        "description": "The stock ticker symbol (e.g., 'AAPL' for Apple Inc.)."
                     }
                 },
-                "required": ["ticker", "amount_usd"]
+                "required": ["ticker"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "getFinancialStatements",
+            "description": "Get financial statements (income statement, balance sheet, or cash flow) for a given stock ticker. Specify the statement type and period (annual or quarterly).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The stock ticker symbol (e.g., 'AAPL' for Apple Inc.)."
+                    },
+                    "statement_type": {
+                        "type": "string",
+                        "description": "The type of financial statement.",
+                        "enum": ["income_statement", "balance_sheet", "cash_flow"]
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": "The period for the financial statement (annual or quarterly).",
+                        "enum": ["annual", "quarterly"]
+                    }
+                },
+                "required": ["ticker", "statement_type", "period"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "getMajorHolders",
+            "description": "Get major holders information for a given stock ticker.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The stock ticker symbol (e.g., 'AAPL' for Apple Inc.)."
+                    }
+                },
+                "required": ["ticker"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "getInstitutionalHolders",
+            "description": "Get institutional holders information for a given stock ticker, including shares held, date reported, percentage out, and value.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The stock ticker symbol (e.g., 'AAPL' for Apple Inc.)."
+                    }
+                },
+                "required": ["ticker"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "getRecommendations",
+            "description": "Get analyst recommendations for a given stock ticker.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The stock ticker symbol (e.g., 'AAPL' for Apple Inc.)."
+                    }
+                },
+                "required": ["ticker"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "getDividends",
+            "description": "Get dividend history for a given stock ticker.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The stock ticker symbol (e.g., 'AAPL' for Apple Inc.)."
+                    }
+                },
+                "required": ["ticker"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "getEarnings",
+            "description": "Get earnings history (annual and quarterly) for a given stock ticker.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The stock ticker symbol (e.g., 'AAPL' for Apple Inc.)."
+                    }
+                },
+                "required": ["ticker"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "getNews",
+            "description": "Get recent news articles for a given stock ticker.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The stock ticker symbol (e.g., 'AAPL' for Apple Inc.)."
+                    },
+                    "num_articles": {
+                        "type": "integer",
+                        "description": "The number of news articles to retrieve (default is 5).",
+                        "default": 5
+                    }
+                },
+                "required": ["ticker"]
             }
         }
     },
@@ -900,18 +1107,18 @@ tools = [
         "type": "function",
         "function": {
             "name": "GoogleSearchAndBrowse",
-            "description": "Perform a Google search for a given query and browse the top results to extract relevant content. Useful for general information, news, or when specific data tools fail. Can retrieve content from multiple sources.",
+            "description": "Perform a Google search for a given query and browse the top results to extract content. Useful for general knowledge questions or information not covered by specific stock tools. Returns a summary of search results and browsed content.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The search query to use for Google search."
+                        "description": "The search query."
                     },
                     "num_results": {
                         "type": "integer",
-                        "description": "The number of top search results to browse (default 3).",
-                        "minimum": 1
+                        "description": "The number of top search results to browse (default is 3).",
+                        "default": 3
                     }
                 },
                 "required": ["query"]
@@ -920,219 +1127,145 @@ tools = [
     }
 ]
 
+# Map tool names to their actual functions
+available_tools = {
+    "getRealtimeStockData": getRealtimeStockData,
+    "getHistoricalStockData": getHistoricalStockData,
+    "getCompanyInfo": getCompanyInfo,
+    "getFinancialStatements": getFinancialStatements,
+    "getMajorHolders": getMajorHolders,
+    "getInstitutionalHolders": getInstitutionalHolders,
+    "getRecommendations": getRecommendations,
+    "getDividends": getDividends,
+    "getEarnings": getEarnings,
+    "getNews": getNews,
+    "GoogleSearchAndBrowse": GoogleSearchAndBrowse
+}
 
-# === Chatbot Core Logic ===
-def run_conversation(current_chat_history):  # current_chat_history is st.session_state.messages
-    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-    deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
-    if not deepseek_api_key or not deepseek_base_url:
-        st.error("DeepSeek API keys not configured for chatbot.")
-        st.markdown("""
-        **Required Environment Variables for Chatbot:**
-        - `GOOGLE_API_KEY`
-        - `GOOGLE_CSE_ID`
-        - `DEEPSEEK_API_KEY`
-        - `DEEPSEEK_BASE_URL` (e.g., `https://api.deepseek.com`)
-        """)
-        return {"role": "assistant",
-                "content": "I cannot function without DeepSeek API keys. Please set them in your environment."}
+def run_conversation(messages):
+    """
+    Manages the conversation with the LLM, including tool calling.
+    """
+    # Add a safety mechanism for rate limiting API calls
+    time.sleep(1) # Sleep for 1 second between API calls to avoid hitting rate limits
 
-    client = openai.OpenAI(api_key=deepseek_api_key, base_url=deepseek_base_url)
-
-    # Prepare messages for the OpenAI API call, converting from simple dicts to OpenAI's expected format
-    api_messages = []
-    for msg in current_chat_history:
-        if msg["role"] == "tool":
-            api_messages.append({
-                "role": "tool",
-                "tool_call_id": msg["tool_call_id"],
-                "name": msg["name"],
-                "content": msg["content"]
-            })
-        elif "tool_calls" in msg and msg["tool_calls"]:
-            # This branch is for assistant messages that contain tool calls
-            # The content should be None when tool_calls are present
-            api_messages.append({
-                "role": msg["role"],
-                "content": None,
-                "tool_calls": [
-                    openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
-                        id=tc["id"],
-                        type=tc["type"], # Explicitly include 'type' here
-                        function=openai.types.chat.chat_completion_message_tool_call.Function(
-                            name=tc["function"]["name"],
-                            arguments=tc["function"].arguments
-                        )
-                    ) for tc in msg["tool_calls"] # Iterate through tool_calls if multiple
-                ]
-            })
-        else:
-            # For regular user/assistant messages
-            api_messages.append({"role": msg["role"], "content": msg["content"]})
-
+    # First, send user message and available tools to the model
     try:
         response = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=api_messages,
-            tools=tools, # Pass the tools definition
-            tool_choice="auto", # Allow the model to choose tools
-            stream=False # Not streaming for simplicity in this function
+            model="gemini-1.5-flash", # Use a model that supports tool calling
+            messages=messages,
+            tools=tools,
+            tool_choice="auto", # Allow the model to decide whether to call a tool
         )
-
         response_message = response.choices[0].message
-        tool_calls = response_message.tool_calls
+        
+        # Check if the model wants to call a tool
+        if response_message.tool_calls:
+            st.write("AI called tool(s):")
+            messages.append(response_message)  # Add assistant's tool call to messages
 
-        if tool_calls:
-            # Step 2: Call the model again with the tool output
-            st.info("🤖 AI wants to call a tool...")
-            # Add the assistant's tool call message to the chat history
-            # Ensure 'type' is included when storing tool_calls in session_state
-            current_chat_history.append({
-                "role": response_message.role,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": tc.type, # Explicitly include type from the model's response
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    } for tc in tool_calls
-                ]
-            })
-
-            for tool_call in tool_calls:
+            for tool_call in response_message.tool_calls:
                 function_name = tool_call.function.name
-                function_args = json.loads(tool_call.function.arguments)
+                function_to_call = available_tools.get(function_name)
                 
-                # Execute the tool function
-                if function_name == "getRealtimeStockData":
-                    tool_response = getRealtimeStockData(ticker=function_args.get("ticker"))
-                elif function_name == "getHistoricalStockData":
-                    tool_response = getHistoricalStockData(ticker=function_args.get("ticker"), period=function_args.get("period", "1mo"))
-                elif function_name == "calculateInvestmentGainLoss":
-                    tool_response = calculateInvestmentGainLoss(
-                        ticker=function_args.get("ticker"),
-                        amount_usd=function_args.get("amount_usd"),
-                        months_ago=function_args.get("months_ago", 1)
-                    )
-                elif function_name == "GoogleSearchAndBrowse": # New tool
-                    tool_response = GoogleSearchAndBrowse(
-                        query=function_args.get("query"),
-                        num_results=function_args.get("num_results", 3) # Use num_results from tool call, default to 3
-                    )
+                if function_to_call:
+                    try:
+                        # Parse arguments from the tool_call.function.arguments (which is a string)
+                        # The fix is here: access arguments as a dictionary key, not an attribute
+                        function_args = json.loads(tool_call.function.arguments)
+                        st.write(f"Tool: {function_name}")
+                        tool_output = function_to_call(**function_args)
+                        st.write("Tool Output:")
+                        st.write(tool_output)
+                        messages.append(
+                            {
+                                "tool_call_id": tool_call.id,
+                                "role": "tool",
+                                "name": function_name,
+                                "content": str(tool_output),
+                            }
+                        )
+                    except json.JSONDecodeError as e:
+                        error_message = f"Error parsing tool arguments for {function_name}: {e}. Arguments: {tool_call.function.arguments}"
+                        st.error(error_message)
+                        messages.append(
+                            {
+                                "tool_call_id": tool_call.id,
+                                "role": "tool",
+                                "name": function_name,
+                                "content": f"Error: {error_message}",
+                            }
+                        )
+                    except Exception as e:
+                        error_message = f"Error executing tool {function_name}: {e}"
+                        st.error(error_message)
+                        messages.append(
+                            {
+                                "tool_call_id": tool_call.id,
+                                "role": "tool",
+                                "name": function_name,
+                                "content": f"Error: {error_message}",
+                            }
+                        )
                 else:
-                    tool_response = f"Error: Unknown tool function: {function_name}"
-
-                # Add tool response to chat history
-                current_chat_history.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "name": function_name,
-                    "content": tool_response
-                })
-                st.info(f"🛠️ Tool '{function_name}' executed. Response: {tool_response[:100]}...") # Show snippet
-
-            # Call the model again to get a final response based on tool output
-            final_response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=api_messages + current_chat_history[-len(tool_calls)-1:], # Send all previous messages + tool call + tool output
-                stream=False
+                    error_message = f"Tool {function_name} not found."
+                    st.error(error_message)
+                    messages.append(
+                        {
+                            "tool_call_id": tool_call.id,
+                            "role": "tool",
+                            "name": function_name,
+                            "content": f"Error: {error_message}",
+                        }
+                    )
+            
+            # Get a new response from the model after tool execution
+            second_response = client.chat.completions.create(
+                model="gemini-1.5-flash",
+                messages=messages,
             )
-            return final_response.choices[0].message
+            return second_response.choices[0].message
         else:
-            # No tool call, return the assistant's direct response
+            # If no tool call, return the direct response
             return response_message
 
     except openai.APIError as e:
-        st.error(f"❌ OpenAI API Error: {e}")
+        st.error(f"OpenAI API Error: {e}")
         return {"role": "assistant", "content": f"An API error occurred: {e}"}
     except Exception as e:
-        st.error(f"❌ An unexpected error occurred in run_conversation: {e}")
+        st.error(f"An unexpected error occurred: {e}")
         return {"role": "assistant", "content": f"An unexpected error occurred: {e}"}
 
+
 # --- Streamlit UI ---
-st.set_page_config(page_title="Stock Predictor & Financial Chatbot", layout="wide")
+st.set_page_config(page_title="Ask Your Financial Questions", page_icon="📈")
+st.title("Ask Your Financial Questions")
 
-st.title("Stock Price Predictor & Financial Chatbot")
+st.write("Hello! I'm your financial chatbot. How can I assist you today?")
 
-# Sidebar for API Key Instructions
-st.sidebar.header("API Key Setup")
-st.sidebar.markdown("""
-To use this application, you need to set up the following environment variables (e.g., in a `.env` file in your project directory or as Streamlit secrets):
+# Initialize chat history in session state
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-- `GOOGLE_API_KEY`: Your API key for Google Custom Search.
-- `GOOGLE_CSE_ID`: Your Custom Search Engine ID.
-- `DEEPSEEK_API_KEY`: Your API key for DeepSeek.
-- `DEEPSEEK_BASE_URL`: The base URL for the DeepSeek API (e.g., `https://api.deepseek.com`)
-- `ALPHA_VANTAGE_API_KEY`: **New!** Your API key for Alpha Vantage. Get a free key from [https://www.alphavantage.co/support/#api-key](https://www.alphavantage.co/support/#api-key)
-- `TESSERACT_CMD`: (Optional) Path to your Tesseract executable if not in system PATH (e.g., `/usr/bin/tesseract` for Linux or `C:\\Program Files\\Tesseract-OCR\\tesseract.exe` for Windows).
+# Display chat messages from history on app rerun
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-**Example `.env` file content:**
-```
-GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY"
-GOOGLE_CSE_ID="YOUR_GOOGLE_CSE_ID"
-DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY"
-DEEPSEEK_BASE_URL="[https://api.deepseek.com](https://api.deepseek.com)"
-ALPHA_VANTAGE_API_KEY="YOUR_ALPHA_VANTAGE_API_KEY"
-# TESSERACT_CMD="/usr/bin/tesseract"
-```
-""")
+# React to user input
+if prompt := st.chat_input("What's on your mind?"):
+    # Display user message in chat message container
+    st.chat_message("user").markdown(prompt)
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
-# Main content area
-tab1, tab2 = st.tabs(["📈 Stock Price Predictor", "💬 Financial Chatbot"])
-
-with tab1:
-    st.header("Upload Chart for Price Prediction")
-    uploaded_file = st.file_uploader("Choose an image file (e.g., PNG, JPG)", type=["png", "jpg", "jpeg"])
-    ticker_input = st.text_input("Enter Stock Ticker Symbol (e.g., AAPL, GOOGL)", "AAPL")
-
-    if uploaded_file and ticker_input:
-        if st.button("Run Prediction"):
-            run_analysis_streamlit(uploaded_file, ticker_input.strip().upper())
-    elif uploaded_file:
-        st.info("Please enter a stock ticker symbol to run the prediction.")
-    elif ticker_input:
-        st.info("Please upload a stock chart image to run the prediction.")
-    else:
-        st.info("Upload a stock chart image and enter a ticker symbol to get started.")
-
-with tab2:
-    st.header("Ask Your Financial Questions")
-
-    # Initialize chat history
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-        st.session_state.messages.append({"role": "assistant", "content": "Hello! I'm your financial chatbot. How can I assist you today?"})
-
-    # Create a container for chat messages with a fixed height and scrollbar
-    chat_history_container = st.container(height=500) # Adjust height as needed
-
-    # Display chat messages inside the container
-    with chat_history_container:
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                if message["role"] == "tool":
-                    st.markdown(f"**Tool Output:**\n```\n{message['content']}\n```")
-                elif "tool_calls" in message and message["tool_calls"]:
-                    st.markdown(f"**AI called tool(s):** {', '.join([tc['function']['name'] for tc in message['tool_calls']])}")
-                else:
-                    st.markdown(message["content"])
-
-    # Chat input remains outside the scrollable container, at the bottom
-    if prompt := st.chat_input("What's on your mind?"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        # Re-run to display the new user message immediately
-        st.rerun()
-
-    # This part will only run after st.rerun() or if no new prompt
-    if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+    with st.spinner("Thinking..."):
+        # Get assistant response
+        response = run_conversation(st.session_state.messages)
+        
+        # Display assistant response in chat message container
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = run_conversation(st.session_state.messages)
-                if response:
-                    st.markdown(response.content)
-                    st.session_state.messages.append({"role": "assistant", "content": response.content})
-                    st.rerun() # Rerun to update chat history container
-                else:
-                    st.error("Could not get a response from the AI.")
+            st.markdown(response.content)
+        # Add assistant response to chat history
+        st.session_state.messages.append({"role": "assistant", "content": response.content})
+
