@@ -603,7 +603,7 @@ def _scrape_price_from_url(url: str, selector: str, ticker: str, source_name: st
     Returns a dictionary with price and source, or None if unsuccessful.
     """
     try:
-        headers = {'User-Agent': 'Mozilla/50 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -1267,10 +1267,13 @@ def run_conversation(messages):
 st.set_page_config(page_title="Ask Your Financial Questions", page_icon="📈")
 st.title("Financial Analysis App")
 
-# --- Stock Chart Image Predictor Section ---
-st.header("Stock Chart Image Predictor")
-with st.expander("Upload a stock chart image for prediction"):
-    uploaded_file = st.file_uploader("Upload a stock chart image (.png, .jpg, .jpeg)", type=["png", "jpg", "jpeg"])
+# Create tabs for the two functionalities
+tab1, tab2 = st.tabs(["Stock Chart Image Predictor", "Financial Chatbot"])
+
+with tab1:
+    st.header("Stock Chart Image Predictor")
+    st.write("Upload a stock chart image and enter a ticker to get a price prediction based on historical data and news sentiment.")
+    uploaded_file = st.file_uploader("Upload a stock chart image (.png, .jpg, .jpeg)", type=["png", "jpg", "jpeg"], key="predictor_uploader")
     ticker_input_predictor = st.text_input("Enter stock ticker (e.g., TSLA) for image analysis:", key="ticker_predictor")
     
     if st.button("Analyze Chart"):
@@ -1279,36 +1282,34 @@ with st.expander("Upload a stock chart image for prediction"):
         else:
             st.warning("Please upload an image and enter a stock ticker to analyze the chart.")
 
-st.markdown("---") # Separator
+with tab2:
+    st.header("Financial Chatbot")
+    st.write("Hello! I'm your financial chatbot. How can I assist you today? You can ask me about real-time stock data, historical data, company information, financial statements, major holders, institutional holders, recommendations, dividends, earnings, or recent news for any stock.")
 
-# --- Financial Chatbot Section ---
-st.header("Financial Chatbot")
-st.write("Hello! I'm your financial chatbot. How can I assist you today?")
+    # Initialize chat history in session state
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-# Initialize chat history in session state
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+    # Display chat messages from history on app rerun
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-# Display chat messages from history on app rerun
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    # React to user input
+    if prompt := st.chat_input("What's on your mind?"):
+        # Display user message in chat message container
+        st.chat_message("user").markdown(prompt)
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
 
-# React to user input
-if prompt := st.chat_input("What's on your mind?"):
-    # Display user message in chat message container
-    st.chat_message("user").markdown(prompt)
-    # Add user message to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
-
-    with st.spinner("Thinking..."):
-        # Get assistant response
-        response = run_conversation(st.session_state.messages)
-        
-        # Display assistant response in chat message container
-        with st.chat_message("assistant"):
-            # Access content using dictionary key
-            st.markdown(response["content"])
-        # Add assistant response to chat history
-        # Ensure the message added to history is also a dictionary
-        st.session_state.messages.append({"role": response["role"], "content": response["content"]})
+        with st.spinner("Thinking..."):
+            # Get assistant response
+            response = run_conversation(st.session_state.messages)
+            
+            # Display assistant response in chat message container
+            with st.chat_message("assistant"):
+                # Access content using dictionary key
+                st.markdown(response["content"])
+            # Add assistant response to chat history
+            # Ensure the message added to history is also a dictionary
+            st.session_state.messages.append({"role": response["role"], "content": response["content"]})
