@@ -745,73 +745,77 @@ def chatbot_app():
         tool_executed = False
         tool_output = None
 
+        # --- 0. Generic Ticker Extraction ---
+        # Try to find a ticker symbol (2-5 uppercase letters) anywhere in the prompt
+        ticker_match = re.search(r'\b([A-Z]{2,5})\b', prompt)
+        extracted_ticker = ticker_match.group(1).upper() if ticker_match else None
+
         # --- Attempt to detect and execute tool calls based on user input patterns ---
         # 1. Real-time stock data
-        if re.search(r'\b(price|current|now)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE):
-            match = re.search(r'\b([A-Z]{2,5})\b', prompt)
-            if match:
-                ticker = match.group(1).upper()
-                st.chat_message("assistant").write(f"Fetching real-time data for {ticker}...")
-                tool_output = getRealtimeStockData(ticker)
-                tool_executed = True
+        # Check for price/current/now keywords AND if a ticker was extracted
+        if extracted_ticker and re.search(r'\b(price|current|now)\b', prompt, re.IGNORECASE):
+            st.chat_message("assistant").write(f"Fetching real-time data for {extracted_ticker}...")
+            tool_output = getRealtimeStockData(extracted_ticker)
+            tool_executed = True
         
         # 2. Historical stock data (More robust detection for timeframes)
         # Pattern for "historical data for AAPL" or "last week's AAPL data" or "AAPL stock data for the past 3 months"
         # The ticker is now explicitly required for this pattern to match
-        historical_match = re.search(r'\b(historical|past|last week\'s|last\s+(\d+)\s*(day|week|month|year)s?)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE)
+        historical_keywords_match = re.search(r'\b(historical|past|last week\'s|last\s+(\d+)\s*(day|week|month|year)s?)\b', prompt, re.IGNORECASE)
         
-        if not tool_executed and historical_match:
-            ticker = historical_match.group(4).upper() # Ticker symbol is the fourth capturing group
+        if not tool_executed and historical_keywords_match:
+            if extracted_ticker:
+                ticker = extracted_ticker # Use the already extracted ticker
 
-            period = "1mo" # Default period if no specific duration is found
+                period = "1mo" # Default period if no specific duration is found
 
-            if "last week's" in historical_match.group(1).lower():
-                period = "5d" # 5 trading days for "last week"
-            elif historical_match.group(2) and historical_match.group(3): # Check if number and unit are captured
-                num = int(historical_match.group(2))
-                unit = historical_match.group(3).lower()
-                if unit == 'day':
-                    period = f"{num}d"
-                elif unit == 'week':
-                    calculated_days = num * 5
-                    if calculated_days <= 60: 
-                        period = f"{calculated_days}d"
-                    else:
-                        period = "3mo" 
-                elif unit == 'month':
-                    period = f"{num}mo"
-                elif unit == 'year':
-                    period = f"{num}y"
-            
-            # Ensure period is one of the valid yfinance periods if it's not already
-            valid_yfinance_periods = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
-            if period not in valid_yfinance_periods:
-                if period.endswith('d') and int(period[:-1]) > 5:
-                    period = "1mo" 
-                elif period.endswith('w'): 
-                    period = "1mo"
-                elif period.endswith('mo') and int(period[:-2]) > 10:
-                    period = "1y" 
-                elif period.endswith('y') and int(period[:-1]) > 10:
-                    period = "max" 
+                if "last week's" in historical_keywords_match.group(1).lower():
+                    period = "5d" # 5 trading days for "last week"
+                elif historical_keywords_match.group(2) and historical_keywords_match.group(3): # Check if number and unit are captured
+                    num = int(historical_keywords_match.group(2))
+                    unit = historical_keywords_match.group(3).lower()
+                    if unit == 'day':
+                        period = f"{num}d"
+                    elif unit == 'week':
+                        calculated_days = num * 5
+                        if calculated_days <= 60: 
+                            period = f"{calculated_days}d"
+                        else:
+                            period = "3mo" 
+                    elif unit == 'month':
+                        period = f"{num}mo"
+                    elif unit == 'year':
+                        period = f"{num}y"
+                
+                # Ensure period is one of the valid yfinance periods if it's not already
+                valid_yfinance_periods = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
                 if period not in valid_yfinance_periods:
-                    period = "1mo" 
+                    if period.endswith('d') and int(period[:-1]) > 5:
+                        period = "1mo" 
+                    elif period.endswith('w'): 
+                        period = "1mo"
+                    elif period.endswith('mo') and int(period[:-2]) > 10:
+                        period = "1y" 
+                    elif period.endswith('y') and int(period[:-1]) > 10:
+                        period = "max" 
+                    if period not in valid_yfinance_periods:
+                        period = "1mo" 
 
-            st.chat_message("assistant").write(f"Fetching historical data for {ticker} over {period}...")
-            tool_output = getHistoricalStockData(ticker, period)
-            tool_executed = True
-        elif not tool_executed and re.search(r'\b(historical|past|last week\'s|last\s+(\d+)\s*(day|week|month|year)s?)\b', prompt, re.IGNORECASE) and not re.search(r'\b([A-Z]{2,5})\b', prompt):
-            # If historical data is requested but no ticker is found
-            tool_output = "Please specify a stock ticker symbol (e.g., AAPL, NVDA) for which you want historical data."
-            tool_executed = True
+                st.chat_message("assistant").write(f"Fetching historical data for {ticker} over {period}...")
+                tool_output = getHistoricalStockData(ticker, period)
+                tool_executed = True
+            else:
+                # If historical data is requested but no ticker is found
+                tool_output = "Please specify a stock ticker symbol (e.g., AAPL, NVDA) for which you want historical data."
+                tool_executed = True
 
 
         # 3. Calculate investment gain/loss
-        elif not tool_executed and re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE):
-            match = re.search(r'\b(\d+)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE)
-            if match:
-                amount = float(match.group(1))
-                ticker = match.group(2).upper()
+        # Check for investment keywords AND if a ticker was extracted
+        elif not tool_executed and extracted_ticker and re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b', prompt, re.IGNORECASE):
+            amount_match = re.search(r'\b(\d+)\b', prompt)
+            if amount_match:
+                amount = float(amount_match.group(1))
                 months_ago_match = re.search(r'(\d+)\s*(month|year)s?\s*ago', prompt, re.IGNORECASE)
                 months_ago = 1
                 if months_ago_match:
@@ -821,13 +825,19 @@ def chatbot_app():
                         months_ago = num * 12
                     else:
                         months_ago = num
-                st.chat_message("assistant").write(f"Calculating investment gain/loss for ${amount} in {ticker} {months_ago} months ago...")
-                tool_output = calculateInvestmentGainLoss(ticker, amount, months_ago)
+                st.chat_message("assistant").write(f"Calculating investment gain/loss for ${amount} in {extracted_ticker} {months_ago} months ago...")
+                tool_output = calculateInvestmentGainLoss(extracted_ticker, amount, months_ago)
                 tool_executed = True
+            else: # If amount not found but investment keywords are
+                tool_output = "Please specify the amount invested (e.g., 'invested $1000 in AAPL')."
+                tool_executed = True
+        elif not tool_executed and re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b', prompt, re.IGNORECASE) and not extracted_ticker:
+            tool_output = "Please specify a stock ticker symbol (e.g., AAPL, NVDA) for which you want to calculate investment gain/loss."
+            tool_executed = True
+
         # 4. General web search (if no other tool matches)
-        elif not tool_executed: # This ensures it's a fallback
+        if not tool_executed: # This ensures it's a fallback
             st.chat_message("assistant").write(f"Searching the web for: '{prompt}'...")
-            # Pass a higher max_results to GoogleSearchAndBrowse
             tool_output = GoogleSearchAndBrowse(prompt, max_results=5) # Try up to 5 results
             tool_executed = True
 
@@ -840,17 +850,22 @@ def chatbot_app():
             # Now, send the full history (including user prompt and tool output) to DeepSeek
             # for a conversational response based on the tool's output.
             with st.spinner("Thinking..."):
-                assistant_response_dict = run_conversation(st.session_state.messages)
-                st.session_state.messages.append(assistant_response_dict)
+                # Create a temporary message list for DeepSeek to guide its response
+                # This is a key change: we're adding a guiding message *for the AI*
+                temp_messages_for_ai = list(st.session_state.messages) # Copy current history
+                
+                # Add a specific instruction to the AI to prevent hallucination of tables
+                temp_messages_for_ai.append({
+                    "role": "user",
+                    "content": "The previous assistant message contains the direct data requested. Please provide a brief, conversational summary or analysis of this data. Do NOT regenerate the table or list the raw data again. Focus on trends, significant changes, or context."
+                })
+
+                assistant_response_dict = run_conversation(temp_messages_for_ai)
+                st.session_state.messages.append(assistant_response_dict) # Append the actual AI response to the main history
                 with st.chat_message(assistant_response_dict["role"]):
                     st.markdown(assistant_response_dict["content"])
-        else:
-            # If no tool was executed, just run the conversation for a direct AI response
-            with st.spinner("Thinking..."):
-                assistant_response_dict = run_conversation(st.session_state.messages) 
-                st.session_state.messages.append(assistant_response_dict)
-                with st.chat_message(assistant_response_dict["role"]):
-                    st.markdown(assistant_response_dict["content"])
+        # No else block here, as tool_executed is always True due to the final fallback search
+        # This ensures a response is always generated.
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("#### About")
