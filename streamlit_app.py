@@ -503,13 +503,13 @@ def GoogleSearchAndBrowse(query):
 
     results = google_search_chatbot(query_with_time, google_api_key, google_cse_id, num=1)
     if not results:
-        return {"source": "N/A", "content": "🕸️ No Google search results found.", "executed_query": query_with_time}
+        return f"🕸️ No Google search results found for query: '{query_with_time}'."
     url = results[0].get('link')
     content = browse_page(url)
     if not content:
-        return {"source": url, "content": f"Could not retrieve content from {url}", "executed_query": query_with_time}
-    # Return a dictionary that includes the actual query executed
-    return {"source": url, "content": content, "executed_query": query_with_time}
+        return f"Could not retrieve content from {url} for query: '{query_with_time}'."
+    # Return a formatted string instead of a dictionary
+    return f"Search Result for '{query_with_time}':\nSource: {url}\nContent: {content}"
 
 def getRealtimeStockData(ticker: str):
     try:
@@ -723,97 +723,95 @@ def run_conversation(current_chat_history): # current_chat_history is st.session
             function_name = tool_call.function.name
             function_args = json.loads(tool_call.function.arguments)
 
-            function_response = None # Initialize function_response
-
-            # Special handling for GoogleSearchAndBrowse to show the full query
+            # Display the tool call to the user
+            # For GoogleSearchAndBrowse, get the full query including time for display
             if function_name == "GoogleSearchAndBrowse":
-                # Call the function to get the actual executed query and content
-                function_result_obj = GoogleSearchAndBrowse(**function_args)
-                function_response = function_result_obj["content"] # Get the actual content for the tool response
-                executed_query_display = function_result_obj["executed_query"] # Get the full query for display
-                st.chat_message("assistant").write(f"Calling tool: `{function_name}` with arguments: `{{'query': '{executed_query_display}'}}`")
+                current_time_pacific = get_pacific_time()
+                displayed_query = f"{function_args.get('query')} as of {current_time_pacific}"
+                st.chat_message("assistant").write(f"Calling tool: `{function_name}` with arguments: `{{'query': '{displayed_query}'}}`")
             else:
-                # Execute the tool for other functions
-                available_functions = {
-                    "GoogleSearchAndBrowse": GoogleSearchAndBrowse, # Keep it here for tool definition
-                    "getRealtimeStockData": getRealtimeStockData,
-                    "getHistoricalStockData": getHistoricalStockData,
-                    "calculateInvestmentGainLoss": calculateInvestmentGainLoss,
-                }
-                function_to_call = available_functions.get(function_name)
-                if function_to_call:
-                    function_response = function_to_call(**function_args)
-                    st.chat_message("assistant").write(f"Calling tool: `{function_name}` with arguments: `{function_args}`")
-                else:
-                    return {"role": "assistant", "content": f"Error: Tool '{function_name}' not found."}
+                st.chat_message("assistant").write(f"Calling tool: `{function_name}` with arguments: `{function_args}`")
 
+            # Execute the tool
+            available_functions = {
+                "GoogleSearchAndBrowse": GoogleSearchAndBrowse,
+                "getRealtimeStockData": getRealtimeStockData,
+                "getHistoricalStockData": getHistoricalStockData,
+                "calculateInvestmentGainLoss": calculateInvestmentGainLoss,
+            }
+            function_to_call = available_functions.get(function_name)
 
-            # Append the AI's tool call message (converted to a simple dict) to current_chat_history
-            # Ensure content is None when tool_calls are present
-            current_chat_history.append({
-                "role": response_message.role,
-                "content": None, # Explicitly set content to None for tool_calls messages
-                "tool_calls": [ # Store tool_calls info in a serializable dict format
+            if function_to_call:
+                # Execute the function and get the response (which will now always be a string for GoogleSearchAndBrowse)
+                function_response = function_to_call(**function_args)
+                
+                # Append the AI's tool call message (converted to a simple dict) to current_chat_history
+                current_chat_history.append({
+                    "role": response_message.role,
+                    "content": None, # Explicitly set content to None for tool_calls messages
+                    "tool_calls": [ # Store tool_calls info in a serializable dict format
+                        {
+                            "id": tc.id,
+                            "type": tc.type, # Include the 'type' field
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        } for tc in response_message.tool_calls
+                    ]
+                })
+
+                # Append the tool's response (as a simple dict) to current_chat_history
+                current_chat_history.append(
                     {
-                        "id": tc.id,
-                        "type": tc.type, # Include the 'type' field
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    } for tc in response_message.tool_calls
-                ]
-            })
-
-            # Append the tool's response (as a simple dict) to current_chat_history
-            current_chat_history.append(
-                {
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": function_name,
-                    "content": function_response,
-                }
-            )
-            
-            # Prepare messages for the second API call using the updated current_chat_history
-            api_messages_for_second_call = []
-            for msg in current_chat_history:
-                if msg["role"] == "tool":
-                    api_messages_for_second_call.append({
+                        "tool_call_id": tool_call.id,
                         "role": "tool",
-                        "tool_call_id": msg["tool_call_id"],
-                        "name": msg["name"],
-                        "content": msg["content"]
-                    })
-                elif "tool_calls" in msg and msg["tool_calls"]:
-                    api_messages_for_second_call.append({
-                        "role": msg["role"],
-                        "content": None, # Ensure content is None for tool_calls messages
-                        "tool_calls": [
-                            openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
-                                id=tc["id"],
-                                type=tc.get("type", "function"), # Ensure 'type' is included
-                                function=openai.types.chat.chat_completion_message_tool_call.Function(
-                                    name=tc["function"]["name"],
-                                    arguments=tc["function"]["arguments"]
-                                )
-                            ) for tc in msg["tool_calls"]
-                        ]
-                    })
-                else:
-                    api_messages_for_second_call.append({"role": msg["role"], "content": msg["content"]})
+                        "name": function_name,
+                        "content": function_response, # This will now be a string
+                    }
+                )
+                
+                # Prepare messages for the second API call using the updated current_chat_history
+                api_messages_for_second_call = []
+                for msg in current_chat_history:
+                    if msg["role"] == "tool":
+                        api_messages_for_second_call.append({
+                            "role": "tool",
+                            "tool_call_id": msg["tool_call_id"],
+                            "name": msg["name"],
+                            "content": msg["content"]
+                        })
+                    elif "tool_calls" in msg and msg["tool_calls"]:
+                        api_messages_for_second_call.append({
+                            "role": msg["role"],
+                            "content": None, # Ensure content is None for tool_calls messages
+                            "tool_calls": [
+                                openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
+                                    id=tc["id"],
+                                    type=tc.get("type", "function"), # Ensure 'type' is included
+                                    function=openai.types.chat.chat_completion_message_tool_call.Function(
+                                        name=tc["function"]["name"],
+                                        arguments=tc["function"]["arguments"]
+                                    )
+                                ) for tc in msg["tool_calls"]
+                            ]
+                        })
+                    else:
+                        api_messages_for_second_call.append({"role": msg["role"], "content": msg["content"]})
 
 
-            second_response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=api_messages_for_second_call, # Use the converted messages for the API call
-                temperature=0.7,
-                timeout=120.0
-            )
-            # Return the final assistant message as a simple dictionary
-            final_assistant_message = {"role": second_response.choices[0].message.role, "content": second_response.choices[0].message.content}
-            # The final message is already appended to history in the main chatbot_app loop
-            return final_assistant_message
+                second_response = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=api_messages_for_second_call, # Use the converted messages for the API call
+                    temperature=0.7,
+                    timeout=120.0
+                )
+                # Return the final assistant message as a simple dictionary
+                final_assistant_message = {"role": second_response.choices[0].message.role, "content": second_response.choices[0].message.content}
+                # The final message is already appended to history in the main chatbot_app loop
+                return final_assistant_message
+            else:
+                return {"role": "assistant", "content": f"Error: Tool '{function_name}' not found."}
         else:
             # Return the assistant message as a simple dictionary
             final_assistant_message = {"role": response_message.role, "content": response_message.content if response_message.content is not None else ""}
