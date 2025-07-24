@@ -12,7 +12,14 @@ import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 from PIL import Image
 import pytesseract
-import shutil # <--- ADD THIS IMPORT
+import shutil
+import pandas as pd
+import yfinance as yf
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+from bs4 import BeautifulSoup
+from googleapiclient.discovery import build
+import pytz
 
 # Set up logging for Streamlit
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -27,7 +34,6 @@ try:
         logging.info(f"Pytesseract command set to: {tesseract_path}")
     else:
         # Fallback to a common Linux path if not found in PATH
-        # This is particularly relevant for Streamlit Cloud environments
         pytesseract.pytesseract.tesseract_cmd = os.getenv("TESSERACT_CMD", "/usr/bin/tesseract")
         logging.warning(f"Tesseract not found in system PATH. Attempting fallback to: {pytesseract.pytesseract.tesseract_cmd}")
 
@@ -36,7 +42,6 @@ try:
         raise FileNotFoundError("Tesseract executable path not found or set.")
     
     # Optional: Verify Tesseract version to ensure it's callable
-    # This can add a slight delay but confirms Tesseract is truly accessible.
     pytesseract.get_tesseract_version() 
 
 except pytesseract.TesseractNotFoundError:
@@ -99,7 +104,7 @@ def extract_price_curve(image):
         inverted_left_roi = cv2.bitwise_not(gray_left_roi)
         _, ocr_thresh_left = cv2.threshold(inverted_left_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         ocr_data_left = pytesseract.image_to_data(ocr_thresh_left, output_type=pytesseract.Output.DICT,
-                                                   config='--psm 6')
+                                                     config='--psm 6')
         potential_y_axes_data.append((ocr_data_left, y_axis_roi_y_start, "left"))
 
     right_roi = image_cv[y_axis_roi_y_start:y_axis_roi_y_end, right_y_axis_roi_x_start:right_y_axis_roi_x_end]
@@ -108,7 +113,7 @@ def extract_price_curve(image):
         inverted_right_roi = cv2.bitwise_not(gray_right_roi)
         _, ocr_thresh_right = cv2.threshold(inverted_right_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         ocr_data_right = pytesseract.image_to_data(ocr_thresh_right, output_type=pytesseract.Output.DICT,
-                                                    config='--psm 6')
+                                                     config='--psm 6')
         potential_y_axes_data.append((ocr_data_right, y_axis_roi_y_start, "right"))
 
     y_axis_labels = []
@@ -457,38 +462,297 @@ def run_analysis_streamlit(uploaded_file, ticker):
     st.write(f"**Overall News Sentiment:** {overall_news_summary}")
 
 
-# --- Streamlit App Layout ---
-st.set_page_config(page_title="Stock Price Predictor", layout="wide")
+# === Financial Chatbot Functions ===
+def get_pacific_time():
+    pacific = pytz.timezone('America/Los_Angeles')
+    return datetime.now(pacific).strftime("%A, %B %d, %Y %I:%M %p %Z")
 
-st.title("AI-Powered Stock Price Predictor")
-st.markdown("""
-Upload a stock chart image and enter a ticker symbol to get a future price prediction,
-adjusted by real-time news sentiment analysis.
-""")
+def google_search_chatbot(query, api_key, cse_id, **kwargs):
+    try:
+        service = build("customsearch", "v1", developerKey=api_key)
+        res = service.cse().list(q=query, cx=cse_id, **kwargs).execute()
+        return res.get('items', [])
+    except Exception as e:
+        print(f"❌ Google Search error: {e}")
+        return []
 
-st.sidebar.header("Inputs")
-uploaded_file = st.sidebar.file_uploader("Upload a Stock Chart Image", type=["png", "jpg", "jpeg"])
-ticker = st.sidebar.text_input("Enter Stock Ticker Symbol (e.g., AAPL, GOOGL, TSLA)", "AAPL")
+def browse_page(url):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        for tag in soup(['script', 'style', 'nav', 'footer', 'header']):
+            tag.decompose()
+        texts = [p.get_text(strip=True) for p in soup.find_all(['p', 'h1', 'h2', 'h3', 'li'])]
+        content = ' '.join(texts)
+        return re.sub(r'\s+', ' ', content).strip()[:4000]
+    except requests.RequestException as e:
+        print(f"❌ Browsing error: {e}")
+        return None
 
-if st.sidebar.button("Run Analysis"):
-    if uploaded_file is not None and ticker:
-        run_analysis_streamlit(uploaded_file, ticker)
-    else:
-        st.sidebar.warning("Please upload an image and enter a ticker symbol.")
+def GoogleSearchAndBrowse(query):
+    google_api_key = os.getenv("GOOGLE_API_KEY")
+    google_cse_id = os.getenv("GOOGLE_CSE_ID")
+    if not google_api_key or not google_cse_id:
+        return "Error: Google API keys not configured for browsing."
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("#### About")
-st.sidebar.info(
-    "This application uses Computer Vision (OpenCV, Tesseract OCR) to extract historical stock data from an image, "
-    "linear regression for initial prediction, and AI (DeepSeek API) for real-time news sentiment analysis "
-    "to adjust the future price forecast."
-)
+    results = google_search_chatbot(query, google_api_key, google_cse_id, num=1)
+    if not results:
+        return "🕸️ No Google search results found."
+    url = results[0].get('link')
+    content = browse_page(url)
+    if not content:
+        return f"Could not retrieve content from {url}"
+    return f"Source: {url}\n\n{content}"
 
-st.sidebar.markdown("#### API Key Setup")
-st.sidebar.markdown(
-    "Ensure you have a `.env` file in the same directory as this script with the following variables set, or configure them as Streamlit secrets:"
-)
-st.sidebar.code("""
+def getRealtimeStockData(ticker: str):
+    try:
+        stock = yf.Ticker(ticker)
+        data = stock.info
+        if not data:
+            return f"No data found for ticker '{ticker}'."
+        price = data.get('regularMarketPrice')
+        open_price = data.get('regularMarketOpen')
+        day_high = data.get('regularMarketDayHigh')
+        day_low = data.get('regularMarketDayLow')
+        volume = data.get('regularMarketVolume')
+        market_time_ts = data.get('regularMarketTime')
+        if price is None:
+            return f"Price data not available for '{ticker}'."
+        if market_time_ts:
+            dt = datetime.fromtimestamp(market_time_ts, pytz.utc).astimezone(pytz.timezone('America/New_York'))
+            time_str = dt.strftime("%Y-%m-%d %I:%M %p %Z")
+        else:
+            time_str = "N/A"
+        return (
+            f"Real-time data for {ticker.upper()}:\n"
+            f"- Price: ${price:.2f}\n"
+            f"- Open: ${open_price:.2f}\n"
+            f"- High: ${day_high:.2f}\n"
+            f"- Low: ${day_low:.2f}\n"
+            f"- Volume: {volume:,}\n"
+            f"- Last Updated: {time_str}"
+        )
+    except Exception as e:
+        return f"Error fetching real-time data for {ticker}: {e}"
+
+def getHistoricalStockData(ticker: str, period: str = "1mo"):
+    try:
+        df = yf.download(ticker, period=period, interval="1d", progress=False)
+        if df.empty:
+            return f"No historical data for '{ticker}' for period '{period}'."
+        df.reset_index(inplace=True)
+        tail_df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']].tail()
+        return f"Historical data for {ticker.upper()} ({period}):\n{tail_df.to_string(index=False)}"
+    except Exception as e:
+        return f"Error fetching historical data for {ticker} ({period}): {e}"
+
+def calculateInvestmentGainLoss(ticker: str, amount_usd: float, months_ago: int = 1):
+    end_date = datetime.today()
+    start_date = end_date - relativedelta(months=months_ago)
+    try:
+        df = yf.download(ticker, start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'), progress=False)
+        if df.empty or len(df) < 2:
+            return f"Not enough data for {ticker.upper()} to calculate investment returns."
+        start_price = df.iloc[0]['Close']
+        end_price = df.iloc[-1]['Close']
+        shares = amount_usd / start_price
+        current_value = shares * end_price
+        profit = current_value - amount_usd
+        percent = (profit / amount_usd) * 100
+        return (
+            f"Investment summary for {ticker.upper()} from {start_date.date()} to {end_date.date()}:\n"
+            f"- Buy price: ${start_price:.2f}\n"
+            f"- Current price: ${end_price:.2f}\n"
+            f"- Shares purchased: {shares:.2f}\n"
+            f"- Current value: ${current_value:.2f}\n"
+            f"- {'Gain' if profit > 0 else 'Loss'}: ${abs(profit):.2f} ({percent:.2f}%)"
+        )
+    except Exception as e:
+        return f"Error calculating investment gain/loss for {ticker}: {e}"
+
+# === Tools Definition for Chatbot ===
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "GoogleSearchAndBrowse",
+            "description": "Search Google for a query and browse top result for content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query string."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "getRealtimeStockData",
+            "description": "Get real-time stock data for a ticker symbol.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "Stock ticker symbol, e.g. AAPL."
+                    }
+                },
+                "required": ["ticker"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "getHistoricalStockData",
+            "description": "Get historical stock data for a ticker symbol over a period.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "Stock ticker symbol."
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": "Data period, e.g. '1mo', '3mo', '1y'.",
+                        "enum": ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
+                    }
+                },
+                "required": ["ticker"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculateInvestmentGainLoss",
+            "description": "Calculate investment gain or loss for a stock over a specified number of months.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "Stock ticker symbol."
+                    },
+                    "amount_usd": {
+                        "type": "number",
+                        "description": "Amount invested in USD."
+                    },
+                    "months_ago": {
+                        "type": "integer",
+                        "description": "Number of months ago the investment was made (default 1)."
+                    }
+                },
+                "required": ["ticker", "amount_usd"]
+            }
+        }
+    }
+]
+
+# === Chatbot Core Logic ===
+def run_conversation(messages):
+    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+    deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
+    if not deepseek_api_key or not deepseek_base_url:
+        st.error("DeepSeek API keys not configured for chatbot.")
+        return {"role": "assistant", "content": "I cannot function without DeepSeek API keys. Please set them in your environment."}
+
+    client = openai.OpenAI(api_key=deepseek_api_key, base_url=deepseek_base_url)
+
+    try:
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            temperature=0.7,
+            timeout=120.0
+        )
+        response_message = response.choices[0].message
+
+        if response_message.tool_calls:
+            tool_call = response_message.tool_calls[0]
+            function_name = tool_call.function.name
+            function_args = json.loads(tool_call.function.arguments)
+
+            st.chat_message("assistant").write(f"Calling tool: `{function_name}` with arguments: `{function_args}`")
+
+            # Execute the tool
+            available_functions = {
+                "GoogleSearchAndBrowse": GoogleSearchAndBrowse,
+                "getRealtimeStockData": getRealtimeStockData,
+                "getHistoricalStockData": getHistoricalStockData,
+                "calculateInvestmentGainLoss": calculateInvestmentGainLoss,
+            }
+            function_to_call = available_functions.get(function_name)
+
+            if function_to_call:
+                function_response = function_to_call(**function_args)
+                messages.append(response_message)
+                messages.append(
+                    {
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": function_name,
+                        "content": function_response,
+                    }
+                )
+                second_response = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=messages,
+                    temperature=0.7,
+                    timeout=120.0
+                )
+                return second_response.choices[0].message
+            else:
+                return {"role": "assistant", "content": f"Error: Tool '{function_name}' not found."}
+        else:
+            return response_message
+    except openai.APITimeoutError:
+        return {"role": "assistant", "content": "The AI request timed out. Please try again."}
+    except Exception as e:
+        return {"role": "assistant", "content": f"An error occurred: {e}"}
+
+
+# === Streamlit App Functions ===
+def predictor_app():
+    st.title("AI-Powered Stock Price Predictor")
+    st.markdown("""
+    Upload a stock chart image and enter a ticker symbol to get a future price prediction,
+    adjusted by real-time news sentiment analysis.
+    """)
+
+    st.sidebar.header("Inputs")
+    uploaded_file = st.sidebar.file_uploader("Upload a Stock Chart Image", type=["png", "jpg", "jpeg"])
+    ticker = st.sidebar.text_input("Enter Stock Ticker Symbol (e.g., AAPL, GOOGL, TSLA)", "AAPL")
+
+    if st.sidebar.button("Run Analysis"):
+        if uploaded_file is not None and ticker:
+            run_analysis_streamlit(uploaded_file, ticker)
+        else:
+            st.sidebar.warning("Please upload an image and enter a ticker symbol.")
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("#### About")
+    st.sidebar.info(
+        "This application uses Computer Vision (OpenCV, Tesseract OCR) to extract historical stock data from an image, "
+        "linear regression for initial prediction, and AI (DeepSeek API) for real-time news sentiment analysis "
+        "to adjust the future price forecast."
+    )
+
+    st.sidebar.markdown("#### API Key Setup")
+    st.sidebar.markdown(
+        "Ensure you have a `.env` file in the same directory as this script with the following variables set, or configure them as Streamlit secrets:"
+    )
+    st.sidebar.code("""
 GOOGLE_API_KEY="your_google_api_key"
 GOOGLE_CSE_ID="your_google_custom_search_engine_id"
 DEEPSEEK_API_KEY="your_deepseek_api_key"
@@ -497,3 +761,72 @@ DEEPSEEK_BASE_URL="https://api.deepseek.com"
 # If you still encounter issues, you might explicitly set it to "/usr/bin/tesseract" for Linux
 # TESSERACT_CMD="/usr/bin/tesseract" 
 """)
+
+def chatbot_app():
+    st.title("Financial Chatbot")
+    st.markdown("Ask me anything about stocks or general financial news!")
+    st.markdown(f"Current Pacific Time: {get_pacific_time()}")
+
+    # Initialize chat history
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # Display chat messages from history
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # React to user input
+    if prompt := st.chat_input("What's on your mind?"):
+        # Display user message in chat history
+        st.chat_message("user").markdown(prompt)
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
+        # Get assistant response
+        with st.spinner("Thinking..."):
+            response = run_conversation(st.session_state.messages)
+            if isinstance(response, dict): # Handle dictionary response for errors/tool calls
+                assistant_response_content = response.get("content", "No response content.")
+                assistant_response_role = response.get("role", "assistant")
+            else: # Handle Message object from OpenAI API
+                assistant_response_content = response.content
+                assistant_response_role = response.role
+
+            # Display assistant response in chat history
+            with st.chat_message(assistant_response_role):
+                st.markdown(assistant_response_content)
+            # Add assistant response to chat history
+            st.session_state.messages.append({"role": assistant_response_role, "content": assistant_response_content})
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("#### About")
+    st.sidebar.info(
+        "This chatbot can fetch real-time and historical stock data, calculate investment returns, "
+        "and browse the web for general financial information using DeepSeek AI and Google Search."
+    )
+    st.sidebar.markdown("#### API Key Setup")
+    st.sidebar.markdown(
+        "Ensure you have a `.env` file in the same directory as this script with the following variables set, or configure them as Streamlit secrets:"
+    )
+    st.sidebar.code("""
+GOOGLE_API_KEY="your_google_api_key"
+GOOGLE_CSE_ID="your_google_custom_search_engine_id"
+DEEPSEEK_API_KEY="your_deepseek_api_key"
+DEEPSEEK_BASE_URL="https://api.deepseek.com"
+""")
+
+
+# --- Main Streamlit App Layout ---
+st.set_page_config(page_title="Financial AI Suite", layout="wide")
+
+st.sidebar.title("Choose Your Mode")
+selected_mode = st.sidebar.radio(
+    "Select an application:",
+    ("Stock Price Predictor", "Financial Chatbot")
+)
+
+if selected_mode == "Stock Price Predictor":
+    predictor_app()
+elif selected_mode == "Financial Chatbot":
+    chatbot_app()
