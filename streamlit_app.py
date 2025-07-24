@@ -603,7 +603,7 @@ def _scrape_price_from_url(url: str, selector: str, ticker: str, source_name: st
     Returns a dictionary with price and source, or None if unsuccessful.
     """
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        headers = {'User-Agent': 'Mozilla/50 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -1307,6 +1307,8 @@ if prompt := st.chat_input("What's on your mind?"):
         
         # Display assistant response in chat message container
         with st.chat_message("assistant"):
-            st.markdown(response.content)
+            # Access content using dictionary key
+            st.markdown(response["content"])
         # Add assistant response to chat history
-        st.session_state.messages.append({"role": "assistant", "content": response.content})
+        # Ensure the message added to history is also a dictionary
+        st.session_state.messages.append({"role": response["role"], "content": response["content"]})
