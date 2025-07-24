@@ -35,14 +35,15 @@ try:
     else:
         # Fallback to a common Linux path if not found in PATH
         pytesseract.pytesseract.tesseract_cmd = os.getenv("TESSERACT_CMD", "/usr/bin/tesseract")
-        logging.warning(f"Tesseract not found in system PATH. Attempting fallback to: {pytesseract.pytesseract.tesseract_cmd}")
+        logging.warning(
+            f"Tesseract not found in system PATH. Attempting fallback to: {pytesseract.pytesseract.tesseract_cmd}")
 
     # Verify if tesseract_cmd is set and tesseract is accessible
     if not pytesseract.pytesseract.tesseract_cmd:
         raise FileNotFoundError("Tesseract executable path not found or set.")
-    
+
     # Optional: Verify Tesseract version to ensure it's callable
-    pytesseract.get_tesseract_version() 
+    pytesseract.get_tesseract_version()
 
 except pytesseract.TesseractNotFoundError:
     st.error(
@@ -104,7 +105,7 @@ def extract_price_curve(image):
         inverted_left_roi = cv2.bitwise_not(gray_left_roi)
         _, ocr_thresh_left = cv2.threshold(inverted_left_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         ocr_data_left = pytesseract.image_to_data(ocr_thresh_left, output_type=pytesseract.Output.DICT,
-                                                     config='--psm 6')
+                                                  config='--psm 6')
         potential_y_axes_data.append((ocr_data_left, y_axis_roi_y_start, "left"))
 
     right_roi = image_cv[y_axis_roi_y_start:y_axis_roi_y_end, right_y_axis_roi_x_start:right_y_axis_roi_x_end]
@@ -113,7 +114,7 @@ def extract_price_curve(image):
         inverted_right_roi = cv2.bitwise_not(gray_right_roi)
         _, ocr_thresh_right = cv2.threshold(inverted_right_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         ocr_data_right = pytesseract.image_to_data(ocr_thresh_right, output_type=pytesseract.Output.DICT,
-                                                     config='--psm 6')
+                                                   config='--psm 6')
         potential_y_axes_data.append((ocr_data_right, y_axis_roi_y_start, "right"))
 
     y_axis_labels = []
@@ -467,6 +468,7 @@ def get_pacific_time():
     pacific = pytz.timezone('America/Los_Angeles')
     return datetime.now(pacific).strftime("%A, %B %d, %Y %I:%M %p %Z")
 
+
 def google_search_chatbot(query, api_key, cse_id, **kwargs):
     try:
         service = build("customsearch", "v1", developerKey=api_key)
@@ -475,6 +477,7 @@ def google_search_chatbot(query, api_key, cse_id, **kwargs):
     except Exception as e:
         print(f"❌ Google Search error: {e}")
         return []
+
 
 def browse_page(url):
     try:
@@ -491,41 +494,26 @@ def browse_page(url):
         print(f"❌ Browsing error: {e}")
         return None
 
-def GoogleSearchAndBrowse(query, max_results=5, target_ticker=None): # Increased max_results and added target_ticker
+
+def GoogleSearchAndBrowse(query):
     google_api_key = os.getenv("GOOGLE_API_KEY")
     google_cse_id = os.getenv("GOOGLE_CSE_ID")
     if not google_api_key or not google_cse_id:
         return "Error: Google API keys not configured for browsing."
 
+    # Include Pacific time in the search query
     current_time_pacific = get_pacific_time()
     query_with_time = f"{query} as of {current_time_pacific}"
-    
-    # Enhance query if a target ticker is provided
-    if target_ticker:
-        query_with_time = f"{target_ticker} stock {query_with_time}"
 
-    results = google_search_chatbot(query_with_time, google_api_key, google_cse_id, num=max_results)
-    
+    results = google_search_chatbot(query_with_time, google_api_key, google_cse_id, num=1)
     if not results:
         return f"🕸️ No Google search results found for query: '{query_with_time}'."
-    
-    # Iterate through results and try to browse until relevant content is found
-    for i, result in enumerate(results):
-        url = result.get('link')
-        if url:
-            content = browse_page(url)
-            if content:
-                # Basic relevance check: does the content mention the target ticker if one was provided?
-                # Also check for common stock finance keywords to ensure it's not a random page
-                if target_ticker and \
-                   (target_ticker.lower() not in content.lower() and f"{target_ticker} stock".lower() not in content.lower()) or \
-                   not any(keyword in content.lower() for keyword in ["stock", "market", "finance", "price", "earnings", "investing"]):
-                    logging.info(f"Skipping irrelevant search result {url} (missing ticker or finance keywords: {target_ticker})")
-                    continue # Skip to the next URL if ticker or finance keywords not found in content
-
-                return f"Search Result for '{query_with_time}' (Source {i+1}/{len(results)}):\nSource: {url}\nContent: {content}"
-        
-    return f"Could not retrieve relevant content from any of the top {max_results} search results for query: '{query_with_time}'."
+    url = results[0].get('link')
+    content = browse_page(url)
+    if not content:
+        return f"Could not retrieve content from {url} for query: '{query_with_time}'."
+    # Return a formatted string instead of a dictionary
+    return f"Search Result for '{query_with_time}':\nSource: {url}\nContent: {content}"
 
 
 def getRealtimeStockData(ticker: str):
@@ -534,107 +522,49 @@ def getRealtimeStockData(ticker: str):
         data = stock.info
         if not data:
             return f"No data found for ticker '{ticker}'."
-        
-        # Safely get data, defaulting to None if key not present
         price = data.get('regularMarketPrice')
-        open_price = data.get('regularMarketOpen') # Corrected key from regularMarketMarketOpen
+        open_price = data.get('regularMarketOpen')
         day_high = data.get('regularMarketDayHigh')
-        day_low = data.get('regularMarketDayLow')
+        day_low = data.get('regularMarketLow')
         volume = data.get('regularMarketVolume')
         market_time_ts = data.get('regularMarketTime')
-
-        # Format values, handling None types explicitly
-        price_str = f"${price:.2f}" if price is not None else "N/A"
-        open_price_str = f"${open_price:.2f}" if open_price is not None else "N/A"
-        day_high_str = f"${day_high:.2f}" if day_high is not None else "N/A"
-        day_low_str = f"${day_low:.2f}" if day_low is not None else "N/A"
-        
-        # Handle volume separately as it's an integer and needs comma formatting
-        if volume is not None:
-            try:
-                volume_str = f"{int(volume):,} shares"
-            except (ValueError, TypeError):
-                volume_str = "N/A"
-        else:
-            volume_str = "N/A"
-        
+        if price is None:
+            return f"Price data not available for '{ticker}'."
         if market_time_ts:
             dt = datetime.fromtimestamp(market_time_ts, pytz.utc).astimezone(pytz.timezone('America/New_York'))
             time_str = dt.strftime("%Y-%m-%d %I:%M %p %Z")
         else:
             time_str = "N/A"
-        
         return (
             f"**Real-time data for {ticker.upper()}:**\n\n"
-            f"**Current Price:** {price_str}\n"
-            f"**Today's Range:** {day_low_str} - {day_high_str}\n"
-            f"**Opening Price:** {open_price_str}\n"
-            f"**Trading Volume:** {volume_str}\n"
+            f"**Current Price:** ${price:.2f}\n"
+            f"**Today's Range:** ${day_low:.2f} - ${day_high:.2f}\n"
+            f"**Opening Price:** ${open_price:.2f}\n"
+            f"**Trading Volume:** {volume:,} shares\n"
             f"**Last Updated:** {time_str}"
         )
     except Exception as e:
-        # Log the full traceback for debugging
-        logging.error(f"Error fetching real-time data for {ticker}: {e}", exc_info=True)
         return f"Error fetching real-time data for {ticker}: {e}"
+
 
 def getHistoricalStockData(ticker: str, period: str = "1mo"):
     try:
         df = yf.download(ticker, period=period, interval="1d", progress=False)
         if df.empty:
-            return f"No historical data for '{ticker}' for period '{period}'.", {}
+            return f"No historical data for '{ticker}' for period '{period}'."
         df.reset_index(inplace=True)
-        
-        # Explicitly convert Date column to string to avoid NaT issues with default format
-        df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
-
-        # Use .loc for setting values on a copy to avoid SettingWithCopyWarning
-        df_to_display = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']].copy()
-        
-        # Apply formatting to numerical columns before converting to string
-        for col in ['Open', 'High', 'Low', 'Close']:
-            df_to_display.loc[:, col] = df_to_display[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
-        df_to_display.loc[:, 'Volume'] = df_to_display['Volume'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "N/A")
-
-        # Now, convert to string
-        output_string = f"Historical data for {ticker.upper()} ({period}):\n{df_to_display.to_string(index=False)}"
-        
-        # Calculate summary statistics for the AI to use
-        summary_stats = {}
-        if not df.empty:
-            # Ensure numerical columns are truly numerical for calculations
-            # Use original df for calculations, not df_to_display which has string values
-            summary_stats['last_close'] = df['Close'].iloc[-1] if 'Close' in df.columns and not df['Close'].empty else None
-            summary_stats['period_high'] = df['High'].max() if 'High' in df.columns and not df['High'].empty else None
-            summary_stats['period_low'] = df['Low'].min() if 'Low' in df.columns and not df['Low'].empty else None
-            summary_stats['period_volume'] = df['Volume'].sum() if 'Volume' in df.columns and not df['Volume'].empty else None
-            
-            # Calculate overall change for the period
-            if len(df) > 1 and 'Open' in df.columns and 'Close' in df.columns:
-                start_price = df['Open'].iloc[0]
-                end_price = df['Close'].iloc[-1]
-                if pd.notna(start_price) and pd.notna(end_price) and start_price != 0:
-                    change = end_price - start_price
-                    percent_change = (change / start_price) * 100
-                    summary_stats['overall_change'] = f"{change:.2f}"
-                    summary_stats['overall_percent_change'] = f"{percent_change:.2f}%"
-                else:
-                    summary_stats['overall_change'] = "N/A"
-                    summary_stats['overall_percent_change'] = "N/A"
-            else:
-                summary_stats['overall_change'] = "N/A"
-                summary_stats['overall_percent_change'] = "N/A"
-
-        return output_string, summary_stats
+        tail_df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']].tail()
+        return f"Historical data for {ticker.upper()} ({period}):\n{tail_df.to_string(index=False)}"
     except Exception as e:
-        # Log the full traceback for debugging
-        logging.error(f"Error fetching historical data for {ticker} ({period}): {e}", exc_info=True)
-        return f"Error fetching historical data for {ticker} ({period}): {e}", {}
+        return f"Error fetching historical data for {ticker} ({period}): {e}"
+
 
 def calculateInvestmentGainLoss(ticker: str, amount_usd: float, months_ago: int = 1):
     end_date = datetime.today()
     start_date = end_date - relativedelta(months=months_ago)
     try:
-        df = yf.download(ticker, start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'), progress=False)
+        df = yf.download(ticker, start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'),
+                         progress=False)
         if df.empty or len(df) < 2:
             return f"Not enough data for {ticker.upper()} to calculate investment returns."
         start_price = df.iloc[0]['Close']
@@ -653,6 +583,7 @@ def calculateInvestmentGainLoss(ticker: str, amount_usd: float, months_ago: int 
         )
     except Exception as e:
         return f"Error calculating investment gain/loss for {ticker}: {e}"
+
 
 # === Tools Definition for Chatbot ===
 # Removed GoogleSearchAndBrowse from here, as it will be called directly.
@@ -707,6 +638,14 @@ tools = [
                     "ticker": {
                         "type": "string",
                         "description": "Stock ticker symbol."
+                    },
+                    "amount_usd": {
+                        "type": "number",
+                        "description": "Amount invested in USD."
+                    },
+                    "months_ago": {
+                        "type": "integer",
+                        "description": "Number of months ago the investment was made (default 1)."
                     }
                 },
                 "required": ["ticker", "amount_usd"]
@@ -715,8 +654,9 @@ tools = [
     }
 ]
 
+
 # === Chatbot Core Logic ===
-def run_conversation(current_chat_history): # current_chat_history is st.session_state.messages
+def run_conversation(current_chat_history):  # current_chat_history is st.session_state.messages
     deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
     deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
     if not deepseek_api_key or not deepseek_base_url:
@@ -728,28 +668,57 @@ def run_conversation(current_chat_history): # current_chat_history is st.session
         - `DEEPSEEK_API_KEY`
         - `DEEPSEEK_BASE_URL` (e.g., `https://api.deepseek.com`)
         """)
-        return {"role": "assistant", "content": "I cannot function without DeepSeek API keys. Please set them in your environment."}
+        return {"role": "assistant",
+                "content": "I cannot function without DeepSeek API keys. Please set them in your environment."}
 
     client = openai.OpenAI(api_key=deepseek_api_key, base_url=deepseek_base_url)
 
     # Prepare messages for the OpenAI API call, converting from simple dicts to OpenAI's expected format
     api_messages = []
     for msg in current_chat_history:
-        # DeepSeek does not use OpenAI's tool_calls structure directly.
-        # We only send user and assistant messages for text generation.
-        # Tool outputs are pre-processed and added as part of the assistant's content.
-        api_messages.append({"role": msg["role"], "content": msg["content"]})
-    
+        # If the message is from the assistant and has 'tool_calls', its content MUST be None.
+        # However, since we are no longer using OpenAI's native tool_calls, this block
+        # for `tool_calls` in `msg` should theoretically not be hit for assistant messages
+        # generated by the DeepSeek model itself. It's kept for robustness if a future
+        # model version or external source introduces tool_calls.
+        if msg["role"] == "tool":
+            api_messages.append({
+                "role": "tool",
+                "tool_call_id": msg["tool_call_id"],
+                "name": msg["name"],
+                "content": msg["content"]
+            })
+        elif "tool_calls" in msg and msg["tool_calls"]:
+            api_messages.append({
+                "role": msg["role"],
+                "content": None,  # Explicitly set content to None for tool_calls messages
+                "tool_calls": [
+                    openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
+                        id=tc["id"],
+                        type=tc.get("type", "function"),
+                        function=openai.types.chat.chat_completion_message_tool_call.Function(
+                            name=tc["function"]["name"],
+                            arguments=tc["function"]["arguments"]
+                        )
+                    ) for tc in msg["tool_calls"]
+                ]
+            })
+        else:
+            api_messages.append({"role": msg["role"], "content": msg["content"]})
+
     try:
         response = client.chat.completions.create(
             model="deepseek-chat",
-            messages=api_messages, 
+            messages=api_messages,
+            # Removed tools and tool_choice parameters as we are handling tools manually
             temperature=0.7,
             timeout=120.0
         )
         response_message = response.choices[0].message
 
-        final_assistant_message = {"role": response_message.role, "content": response_message.content if response_message.content is not None else ""}
+        # DeepSeek will now only return text responses, not tool_calls.
+        final_assistant_message = {"role": response_message.role,
+                                   "content": response_message.content if response_message.content is not None else ""}
         return final_assistant_message
     except openai.APITimeoutError:
         return {"role": "assistant", "content": "The AI request timed out. Please try again."}
@@ -789,13 +758,9 @@ def chatbot_app():
     st.markdown("Ask me anything about stocks or general financial news!")
     st.markdown(f"Current Pacific Time: {get_pacific_time()}")
 
-    # Initialize chat history and flags
+    # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if "waiting_for_ticker" not in st.session_state:
-        st.session_state.waiting_for_ticker = False
-    if "last_requested_period" not in st.session_state:
-        st.session_state.last_requested_period = "1mo" # Default
 
     # Display chat messages from history
     for message in st.session_state.messages:
@@ -806,158 +771,96 @@ def chatbot_app():
     if prompt := st.chat_input("What's on your mind?"):
         # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
-        st.chat_message("user").markdown(prompt) # Display immediately
+        st.chat_message("user").markdown(prompt)  # Display immediately
 
-        # Variables to store tool results
-        tool_output_to_display = None # This will be the string displayed to the user
-        tool_summary_for_ai_prompt = "" # This will be added to the AI's prompt for summarization
+        # Flag to check if a tool was executed
+        tool_executed = False
+        tool_output = None
 
-        # --- 0. Generic Ticker Extraction ---
-        ticker_match = re.search(r'\b([A-Z]{2,5})\b', prompt)
-        extracted_ticker = ticker_match.group(1).upper() if ticker_match else None
-
-        # --- Attempt to execute tools in order of priority ---
-        # 1. Handle follow-up ticker for historical data
-        if st.session_state.waiting_for_ticker and extracted_ticker and len(prompt.strip()) == len(extracted_ticker):
-            st.chat_message("assistant").write(f"Fetching historical data for {extracted_ticker} over {st.session_state.last_requested_period}...")
-            raw_output, summary_stats = getHistoricalStockData(extracted_ticker, st.session_state.last_requested_period)
-            tool_output_to_display = raw_output
-            if "Error fetching" not in raw_output and "No historical data" not in raw_output:
-                if summary_stats:
-                    tool_summary_for_ai_prompt = (
-                        f"The user has been provided with historical stock data for {extracted_ticker} for the period {st.session_state.last_requested_period}.\n"
-                        f"Key facts from this data:\n"
-                        f"- Last closing price: ${summary_stats.get('last_close', 'N/A'):.2f}\n"
-                        f"- Highest price in this period: ${summary_stats.get('period_high', 'N/A'):.2f}\n"
-                        f"- Lowest price in this period: ${summary_stats.get('period_low', 'N/A'):.2f}\n"
-                        f"- Total trading volume in this period: {summary_stats.get('period_volume', 'N/A'):,.0f} shares\n"
-                        f"- Overall price change for the period: {summary_stats.get('overall_change', 'N/A')} ({summary_stats.get('overall_percent_change', 'N/A')})\n"
-                        f"Please provide a concise, conversational summary or analysis of this data. Do NOT regenerate the table or invent any numbers. Refer ONLY to the facts provided or general market trends relevant to the provided data."
-                    )
-            st.session_state.waiting_for_ticker = False # Reset flag
-
-        # 2. Real-time stock data (if not handled by follow-up)
-        elif extracted_ticker and re.search(r'\b(price|current|now|real-time)\b', prompt, re.IGNORECASE):
-            st.chat_message("assistant").write(f"Fetching real-time data for {extracted_ticker}...")
-            tool_output_to_display = getRealtimeStockData(extracted_ticker)
-            if "Error fetching" in tool_output_to_display or "No data found" in tool_output_to_display:
-                # If real-time data failed, clear output and try historical or search
-                tool_output_to_display = None 
-            else:
-                # If successful, prepare summary for AI
-                tool_summary_for_ai_prompt = (
-                    f"The user has been provided with real-time stock data for {extracted_ticker}.\n"
-                    f"Please provide a concise, conversational summary or analysis of this data. Do NOT regenerate the table or invent any numbers. Refer ONLY to the facts provided or general market trends relevant to the provided data."
-                )
-
-        # 3. Historical stock data (Initial request, if not handled by follow-up or real-time)
-        historical_keywords_pattern = re.compile(r'\b(historical|past|last week\'s|last\s+(\d+)\s*(day|week|month|year)s?|data|price)\b', re.IGNORECASE)
-        
-        if tool_output_to_display is None and historical_keywords_pattern.search(prompt):
-            if extracted_ticker:
-                ticker = extracted_ticker
-                period = "1mo"
-                period_match_specific = re.search(r'last\s+(\d+)\s*(day|week|month|year)s?', prompt, re.IGNORECASE)
-                if "last week's" in prompt.lower() or "last week" in prompt.lower():
-                    period = "5d"
-                elif period_match_specific:
-                    num = int(period_match_specific.group(1))
-                    unit = period_match_specific.group(2).lower()
-                    if unit == 'day': period = f"{num}d"
-                    elif unit == 'week': period = f"{num*5}d"
-                    elif unit == 'month': period = f"{num}mo"
-                    elif unit == 'year': period = f"{num}y"
-                valid_yfinance_periods = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
-                if period not in valid_yfinance_periods:
-                    if period.endswith('d') and int(period[:-1]) > 5: period = "1mo"
-                    elif period.endswith('w'): period = "1mo"
-                    elif period.endswith('mo') and int(period[:-2]) > 10: period = "1y"
-                    elif period.endswith('y') and int(period[:-1]) > 10: period = "max"
-                    if period not in valid_yfinance_periods: period = "1mo"
-
+        # --- Attempt to detect and execute tool calls based on user input patterns ---
+        # Real-time stock data
+        if re.search(r'\b(price|current|now)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE):
+            match = re.search(r'\b([A-Z]{2,5})\b', prompt)
+            if match:
+                ticker = match.group(1).upper()
+                st.chat_message("assistant").write(f"Fetching real-time data for {ticker}...")
+                tool_output = getRealtimeStockData(ticker)
+                tool_executed = True
+        # Historical stock data
+        elif re.search(r'\b(historical|past|data)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE):
+            match = re.search(r'\b([A-Z]{2,5})\b', prompt)
+            if match:
+                ticker = match.group(1).upper()
+                period_match = re.search(r'\b(1d|5d|1mo|3mo|6mo|1y|2y|5y|10y|ytd|max)\b', prompt, re.IGNORECASE)
+                period = period_match.group(1) if period_match else "1mo"
                 st.chat_message("assistant").write(f"Fetching historical data for {ticker} over {period}...")
-                raw_output, summary_stats = getHistoricalStockData(ticker, period)
-                tool_output_to_display = raw_output
-                if "Error fetching" in raw_output or "No historical data" in raw_output:
-                    tool_output_to_display = None # Clear output if error/no data
-                else:
-                    if summary_stats:
-                        tool_summary_for_ai_prompt = (
-                            f"The user has been provided with historical stock data for {extracted_ticker} for the period {period}.\n"
-                            f"Key facts from this data:\n"
-                            f"- Last closing price: ${summary_stats.get('last_close', 'N/A'):.2f}\n"
-                            f"- Highest price in this period: ${summary_stats.get('period_high', 'N/A'):.2f}\n"
-                            f"- Lowest price in this period: ${summary_stats.get('period_low', 'N/A'):.2f}\n"
-                            f"- Total trading volume in this period: {summary_stats.get('period_volume', 'N/A'):,.0f} shares\n"
-                            f"- Overall price change for the period: {summary_stats.get('overall_change', 'N/A')} ({summary_stats.get('overall_percent_change', 'N/A')})\n"
-                            f"Please provide a concise, conversational summary or analysis of this data. Do NOT regenerate the table or invent any numbers. Refer ONLY to the facts provided or general market trends relevant to the provided data."
-                        )
-            else:
-                tool_output_to_display = "Please specify a stock ticker symbol (e.g., AAPL, NVDA) for which you want historical data."
-                st.session_state.waiting_for_ticker = True
-                period_match_specific = re.search(r'last\s+(\d+)\s*(day|week|month|year)s?', prompt, re.IGNORECASE)
-                if "last week's" in prompt.lower() or "last week" in prompt.lower():
-                    st.session_state.last_requested_period = "5d"
-                elif period_match_specific:
-                    num = int(period_match_specific.group(1))
-                    unit = period_match_specific.group(2).lower()
-                    if unit == 'day': st.session_state.last_requested_period = f"{num}d"
-                    elif unit == 'week': st.session_state.last_requested_period = f"{num*5}d"
-                    elif unit == 'month': st.session_state.last_requested_period = f"{num}mo"
-                    elif unit == 'year': st.session_state.last_requested_period = f"{num}y"
-                else:
-                    st.session_state.last_requested_period = "1mo"
-        
-        # 4. Calculate investment gain/loss (if not handled by above)
-        if tool_output_to_display is None and extracted_ticker and re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b', prompt, re.IGNORECASE):
-            amount_match = re.search(r'\b(\d+)\b', prompt)
-            if amount_match:
-                amount = float(amount_match.group(1))
+                tool_output = getHistoricalStockData(ticker, period)
+                tool_executed = True
+        # Calculate investment gain/loss
+        elif re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE):
+            match = re.search(r'\b(\d+)\b.*\b([A-Z]{2,5})\b', prompt, re.IGNORECASE)
+            if match:
+                amount = float(match.group(1))
+                ticker = match.group(2).upper()
                 months_ago_match = re.search(r'(\d+)\s*(month|year)s?\s*ago', prompt, re.IGNORECASE)
                 months_ago = 1
                 if months_ago_match:
                     num = int(months_ago_match.group(1))
                     unit = months_ago_match.group(2).lower()
-                    if unit == 'year': months_ago = num * 12
-                    else: months_ago = num
-                st.chat_message("assistant").write(f"Calculating investment gain/loss for ${amount} in {extracted_ticker} {months_ago} months ago...")
-                tool_output_to_display = calculateInvestmentGainLoss(extracted_ticker, amount, months_ago)
-                if "Error calculating" in tool_output_to_display or "Not enough data" in tool_output_to_display:
-                    tool_output_to_display = None
-            else:
-                tool_output_to_display = "Please specify the amount invested (e.g., 'invested $1000 in AAPL')."
-        
-        elif tool_output_to_display is None and re.search(r'\b(invested|gain|loss|profit)\b.*\b(\d+)\b', prompt, re.IGNORECASE) and not extracted_ticker:
-            tool_output_to_display = "Please specify a stock ticker symbol (e.g., AAPL, NVDA) for which you want to calculate investment gain/loss."
-
-
-        # 5. General web search (ultimate fallback if no other tool provided data)
-        if tool_output_to_display is None:
+                    if unit == 'year':
+                        months_ago = num * 12
+                    else:
+                        months_ago = num
+                st.chat_message("assistant").write(
+                    f"Calculating investment gain/loss for ${amount} in {ticker} {months_ago} months ago...")
+                tool_output = calculateInvestmentGainLoss(ticker, amount, months_ago)
+                tool_executed = True
+        # General web search (if no other tool matches)
+        elif re.search(r'\b(search|find|news|tell me about)\b', prompt, re.IGNORECASE) or not tool_executed:
+            # If no specific stock tool was triggered, consider it a general search
             st.chat_message("assistant").write(f"Searching the web for: '{prompt}'...")
-            tool_output_to_display = GoogleSearchAndBrowse(prompt, max_results=5, target_ticker=extracted_ticker) 
-        
-        # Display the tool's output to the user
-        st.session_state.messages.append({"role": "assistant", "content": tool_output_to_display})
-        with st.chat_message("assistant"):
-            st.markdown(tool_output_to_display)
-        
-        # Now, send the full history (including user prompt and tool output) to DeepSeek
-        # for a conversational response based on the tool's output.
-        with st.spinner("Thinking..."):
-            temp_messages_for_ai = list(st.session_state.messages)
-            
-            if tool_summary_for_ai_prompt:
-                temp_messages_for_ai.append({
-                    "role": "user",
-                    "content": tool_summary_for_ai_prompt
-                })
-            else:
-                temp_messages_for_ai.append({
-                    "role": "user",
-                    "content": "The previous assistant message contains the direct data requested. Please provide a brief, conversational summary or analysis of this data. Do NOT regenerate the table or list the raw data again. Focus on trends, significant changes, or context."
-                })
+            tool_output = GoogleSearchAndBrowse(prompt)
+            tool_executed = True
 
-            assistant_response_dict = run_conversation(temp_messages_for_ai)
-            st.session_state.messages.append(assistant_response_dict)
-            with st.chat_message(assistant_response_dict["role"]):
-                st.markdown(assistant_response_dict["content"])
+        if tool_executed:
+            # Append tool output to history and display it
+            st.session_state.messages.append({"role": "assistant", "content": tool_output})
+            with st.chat_message("assistant"):
+                st.markdown(tool_output)
+
+            # Now, send the full history (including user prompt and tool output) to DeepSeek
+            # for a conversational response based on the tool's output.
+            with st.spinner("Thinking..."):
+                assistant_response_dict = run_conversation(st.session_state.messages)
+                st.session_state.messages.append(assistant_response_dict)
+                with st.chat_message(assistant_response_dict["role"]):
+                    st.markdown(assistant_response_dict["content"])
+        else:
+            # If no tool was executed, just run the conversation for a direct AI response
+            with st.spinner("Thinking..."):
+                assistant_response_dict = run_conversation(st.session_state.messages)
+                st.session_state.messages.append(assistant_response_dict)
+                with st.chat_message(assistant_response_dict["role"]):
+                    st.markdown(assistant_response_dict["content"])
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("#### About")
+    st.sidebar.info(
+        "This chatbot can fetch real-time and historical stock data, calculate investment returns, "
+        "and browse the web for general financial information using DeepSeek AI and Google Search."
+    )
+
+
+# --- Main Streamlit App Layout ---
+st.set_page_config(page_title="Financial AI Suite", layout="wide")
+
+st.sidebar.title("Choose Your Mode")
+selected_mode = st.sidebar.radio(
+    "Select an application:",
+    ("Stock Price Predictor", "Financial Chatbot")
+)
+
+if selected_mode == "Stock Price Predictor":
+    predictor_app()
+elif selected_mode == "Financial Chatbot":
+    chatbot_app()
