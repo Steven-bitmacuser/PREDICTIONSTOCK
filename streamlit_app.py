@@ -516,10 +516,12 @@ def GoogleSearchAndBrowse(query, max_results=5, target_ticker=None): # Increased
             content = browse_page(url)
             if content:
                 # Basic relevance check: does the content mention the target ticker if one was provided?
-                if target_ticker and target_ticker.lower() not in content.lower() and \
-                   f"{target_ticker} stock".lower() not in content.lower():
-                    logging.info(f"Skipping irrelevant search result {url} (missing ticker: {target_ticker})")
-                    continue # Skip to the next URL if ticker not found in content
+                # Also check for common stock finance keywords to ensure it's not a random page
+                if target_ticker and \
+                   (target_ticker.lower() not in content.lower() and f"{target_ticker} stock".lower() not in content.lower()) or \
+                   not any(keyword in content.lower() for keyword in ["stock", "market", "finance", "price", "earnings", "investing"]):
+                    logging.info(f"Skipping irrelevant search result {url} (missing ticker or finance keywords: {target_ticker})")
+                    continue # Skip to the next URL if ticker or finance keywords not found in content
 
                 return f"Search Result for '{query_with_time}' (Source {i+1}/{len(results)}):\nSource: {url}\nContent: {content}"
         
@@ -762,27 +764,29 @@ def chatbot_app():
         # --- Attempt to detect and execute tool calls based on user input patterns ---
         # 1. Real-time stock data
         # Check for price/current/now keywords AND if a ticker was extracted
-        if extracted_ticker and re.search(r'\b(price|current|now)\b', prompt, re.IGNORECASE):
+        if extracted_ticker and re.search(r'\b(price|current|now|real-time)\b', prompt, re.IGNORECASE):
             st.chat_message("assistant").write(f"Fetching real-time data for {extracted_ticker}...")
             tool_output = getRealtimeStockData(extracted_ticker)
             tool_executed = True
         
-        # 2. Historical stock data (More robust detection for timeframes)
-        # Pattern for "historical data for AAPL" or "last week's AAPL data" or "AAPL stock data for the past 3 months"
-        # The ticker is now explicitly required for this pattern to match
-        historical_keywords_match = re.search(r'\b(historical|past|last week\'s|last\s+(\d+)\s*(day|week|month|year)s?)\b', prompt, re.IGNORECASE)
+        # 2. Historical stock data
+        # Keywords for historical data
+        historical_keywords_pattern = re.compile(r'\b(historical|past|last week\'s|last\s+(\d+)\s*(day|week|month|year)s?|data|price)\b', re.IGNORECASE)
         
-        if not tool_executed and historical_keywords_match:
+        # Check if historical keywords are present in the prompt
+        if not tool_executed and historical_keywords_pattern.search(prompt):
             if extracted_ticker:
                 ticker = extracted_ticker # Use the already extracted ticker
 
                 period = "1mo" # Default period if no specific duration is found
 
-                if "last week's" in historical_keywords_match.group(1).lower():
+                # More flexible period extraction
+                period_match_specific = re.search(r'last\s+(\d+)\s*(day|week|month|year)s?', prompt, re.IGNORECASE)
+                if "last week's" in prompt.lower() or "last week" in prompt.lower():
                     period = "5d" # 5 trading days for "last week"
-                elif historical_keywords_match.group(2) and historical_keywords_match.group(3): # Check if number and unit are captured
-                    num = int(historical_keywords_match.group(2))
-                    unit = historical_keywords_match.group(3).lower()
+                elif period_match_specific:
+                    num = int(period_match_specific.group(1))
+                    unit = period_match_specific.group(2).lower()
                     if unit == 'day':
                         period = f"{num}d"
                     elif unit == 'week':
@@ -790,7 +794,7 @@ def chatbot_app():
                         if calculated_days <= 60: 
                             period = f"{calculated_days}d"
                         else:
-                            period = "3mo" 
+                            period = "3mo" # Fallback for longer week periods
                     elif unit == 'month':
                         period = f"{num}mo"
                     elif unit == 'year':
