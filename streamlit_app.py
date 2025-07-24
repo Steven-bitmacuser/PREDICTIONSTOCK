@@ -491,25 +491,31 @@ def browse_page(url):
         print(f"❌ Browsing error: {e}")
         return None
 
-def GoogleSearchAndBrowse(query):
+def GoogleSearchAndBrowse(query, max_results=3): # Added max_results parameter
     google_api_key = os.getenv("GOOGLE_API_KEY")
     google_cse_id = os.getenv("GOOGLE_CSE_ID")
     if not google_api_key or not google_cse_id:
         return "Error: Google API keys not configured for browsing."
 
-    # Include Pacific time in the search query
     current_time_pacific = get_pacific_time()
     query_with_time = f"{query} as of {current_time_pacific}"
 
-    results = google_search_chatbot(query_with_time, google_api_key, google_cse_id, num=1)
+    # Get multiple search results
+    results = google_search_chatbot(query_with_time, google_api_key, google_cse_id, num=max_results)
+    
     if not results:
         return f"🕸️ No Google search results found for query: '{query_with_time}'."
-    url = results[0].get('link')
-    content = browse_page(url)
-    if not content:
-        return f"Could not retrieve content from {url} for query: '{query_with_time}'."
-    # Return a formatted string instead of a dictionary
-    return f"Search Result for '{query_with_time}':\nSource: {url}\nContent: {content}"
+    
+    # Iterate through results and try to browse until content is found
+    for i, result in enumerate(results):
+        url = result.get('link')
+        if url:
+            content = browse_page(url)
+            if content:
+                return f"Search Result for '{query_with_time}' (Source {i+1}/{len(results)}):\nSource: {url}\nContent: {content}"
+        
+    return f"Could not retrieve relevant content from any of the top {max_results} search results for query: '{query_with_time}'."
+
 
 def getRealtimeStockData(ticker: str):
     try:
@@ -821,7 +827,8 @@ def chatbot_app():
         # 4. General web search (if no other tool matches)
         elif not tool_executed: # This ensures it's a fallback
             st.chat_message("assistant").write(f"Searching the web for: '{prompt}'...")
-            tool_output = GoogleSearchAndBrowse(prompt)
+            # Pass a higher max_results to GoogleSearchAndBrowse
+            tool_output = GoogleSearchAndBrowse(prompt, max_results=5) # Try up to 5 results
             tool_executed = True
 
         if tool_executed:
