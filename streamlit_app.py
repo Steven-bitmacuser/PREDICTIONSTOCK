@@ -459,7 +459,7 @@ def run_analysis_streamlit(uploaded_file, ticker):
     st.subheader("Final Prediction Summary:")
     st.write(f"**Last historical price:** ${y_hist[-1]:.2f}")
     st.write(f"**Predicted price after 50 time steps:** ${y_future_adjusted[-1]:.2f}")
-    st.write(f"**Overall News Sentiment:** {overall_news_summary}")
+    f"**Overall News Sentiment:** {overall_news_summary}"
 
 
 # === Financial Chatbot Functions ===
@@ -684,6 +684,7 @@ def run_conversation(current_chat_history): # current_chat_history is st.session
                 "tool_calls": [
                     openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
                         id=tc["id"],
+                        type=tc.get("type", "function"), # Ensure 'type' is included, default to 'function'
                         function=openai.types.chat.chat_completion_message_tool_call.Function(
                             name=tc["function"]["name"],
                             arguments=tc["function"]["arguments"]
@@ -727,10 +728,11 @@ def run_conversation(current_chat_history): # current_chat_history is st.session
                 # Append the AI's tool call message (converted to a simple dict) to current_chat_history
                 current_chat_history.append({
                     "role": response_message.role,
-                    "content": response_message.content,
+                    "content": response_message.content if response_message.content is not None else "", # Ensure content is string
                     "tool_calls": [ # Store tool_calls info in a serializable dict format
                         {
                             "id": tc.id,
+                            "type": tc.type, # Include the 'type' field
                             "function": {
                                 "name": tc.function.name,
                                 "arguments": tc.function.arguments
@@ -766,6 +768,7 @@ def run_conversation(current_chat_history): # current_chat_history is st.session
                             "tool_calls": [
                                 openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
                                     id=tc["id"],
+                                    type=tc.get("type", "function"), # Ensure 'type' is included
                                     function=openai.types.chat.chat_completion_message_tool_call.Function(
                                         name=tc["function"]["name"],
                                         arguments=tc["function"]["arguments"]
@@ -789,7 +792,7 @@ def run_conversation(current_chat_history): # current_chat_history is st.session
                 return {"role": "assistant", "content": f"Error: Tool '{function_name}' not found."}
         else:
             # Return the assistant message as a simple dictionary
-            return {"role": response_message.role, "content": response_message.content}
+            return {"role": response_message.role, "content": response_message.content if response_message.content is not None else ""}
     except openai.APITimeoutError:
         return {"role": "assistant", "content": "The AI request timed out. Please try again."}
     except Exception as e:
