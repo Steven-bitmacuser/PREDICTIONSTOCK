@@ -1049,7 +1049,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "getDividends",
-            "description": "Get dividend history for a given stock ticker.",
+            "description": "Get dividend history for a given ticker.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1147,20 +1147,40 @@ def run_conversation(messages):
     # Add a safety mechanism for rate limiting API calls
     time.sleep(1) # Sleep for 1 second between API calls to avoid hitting rate limits
 
-    # First, send user message and available tools to the model
     try:
+        # The messages list passed to client.chat.completions.create needs to be in the correct format.
+        # Streamlit's session_state.messages already holds dictionaries.
+        # We need to ensure that when we append the *model's* response, it's also a dictionary.
+
         response = client.chat.completions.create(
             model="deepseek-chat", # Changed model to deepseek-chat
-            messages=messages,
+            messages=messages, # messages list already contains dictionaries
             tools=tools,
             tool_choice="auto", # Allow the model to decide whether to call a tool
         )
-        response_message = response.choices[0].message
+        response_message = response.choices[0].message # This is an OpenAI ChatCompletionMessage object
         
         # Check if the model wants to call a tool
         if response_message.tool_calls:
             st.write("AI called tool(s):")
-            messages.append(response_message)  # Add assistant's tool call to messages
+            
+            # Convert the ChatCompletionMessage object for the tool call into a dictionary
+            # and append it to the messages list.
+            tool_call_message_dict = {
+                "role": response_message.role,
+                "content": response_message.content or "", # Content can be None for pure tool calls
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "function": {
+                            "arguments": tc.function.arguments,
+                            "name": tc.function.name
+                        },
+                        "type": "function"
+                    } for tc in response_message.tool_calls
+                ]
+            }
+            messages.append(tool_call_message_dict) # Append the assistant's tool call message as a dictionary
 
             for tool_call in response_message.tool_calls:
                 function_name = tool_call.function.name
@@ -1168,13 +1188,13 @@ def run_conversation(messages):
                 
                 if function_to_call:
                     try:
-                        # Parse arguments from the tool_call.function.arguments (which is a string)
-                        # The fix is here: access arguments as a dictionary key, not an attribute
                         function_args = json.loads(tool_call.function.arguments)
                         st.write(f"Tool: {function_name}")
                         tool_output = function_to_call(**function_args)
                         st.write("Tool Output:")
                         st.write(tool_output)
+                        
+                        # Append tool output to messages as a dictionary
                         messages.append(
                             {
                                 "tool_call_id": tool_call.id,
@@ -1220,15 +1240,23 @@ def run_conversation(messages):
             # Get a new response from the model after tool execution
             second_response = client.chat.completions.create(
                 model="deepseek-chat", # Changed model to deepseek-chat
-                messages=messages,
+                messages=messages, # Pass all messages including tool outputs
             )
-            return second_response.choices[0].message
+            # Convert the final response message to a dictionary before returning
+            final_response_message_obj = second_response.choices[0].message
+            return {
+                "role": final_response_message_obj.role,
+                "content": final_response_message_obj.content or ""
+            }
         else:
-            # If no tool call, return the direct response
-            return response_message
+            # If no tool call, return the direct response as a dictionary
+            return {
+                "role": response_message.role,
+                "content": response_message.content or ""
+            }
 
     except openai.APIError as e:
-        st.error(f"DeepSeek API Error: {e}") # Changed error message
+        st.error(f"DeepSeek API Error: {e}")
         return {"role": "assistant", "content": f"An API error occurred: {e}"}
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
@@ -1282,4 +1310,3 @@ if prompt := st.chat_input("What's on your mind?"):
             st.markdown(response.content)
         # Add assistant response to chat history
         st.session_state.messages.append({"role": "assistant", "content": response.content})
-
