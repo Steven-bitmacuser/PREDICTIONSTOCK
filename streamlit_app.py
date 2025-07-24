@@ -368,10 +368,10 @@ def run_analysis_streamlit(uploaded_file, ticker):
         st.error(
             "Missing one or more required environment variables. Please check your `.env` file or Streamlit secrets.")
         st.markdown("""
-        **Required Environment Variables:**
+        **Required Environment Variables for Predictor:**
         - `GOOGLE_API_KEY`
         - `GOOGLE_CSE_ID`
-        - `DEEPSEEEK_API_KEY`
+        - `DEEPSEEK_API_KEY`
         - `DEEPSEEK_BASE_URL` (e.g., `https://api.deepseek.com`)
         - `TESSERACT_CMD` (Optional, if tesseract is not in your system's PATH, though auto-detection is preferred)
         """)
@@ -662,6 +662,13 @@ def run_conversation(current_chat_history): # current_chat_history is st.session
     deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
     if not deepseek_api_key or not deepseek_base_url:
         st.error("DeepSeek API keys not configured for chatbot.")
+        st.markdown("""
+        **Required Environment Variables for Chatbot:**
+        - `GOOGLE_API_KEY`
+        - `GOOGLE_CSE_ID`
+        - `DEEPSEEK_API_KEY`
+        - `DEEPSEEK_BASE_URL` (e.g., `https://api.deepseek.com`)
+        """)
         return {"role": "assistant", "content": "I cannot function without DeepSeek API keys. Please set them in your environment."}
 
     client = openai.OpenAI(api_key=deepseek_api_key, base_url=deepseek_base_url)
@@ -825,19 +832,6 @@ def predictor_app():
         "to adjust the future price forecast."
     )
 
-    st.sidebar.markdown("#### API Key Setup")
-    st.sidebar.markdown(
-        "Ensure you have a `.env` file in the same directory as this script with the following variables set, or configure them as Streamlit secrets:"
-    )
-    st.sidebar.code("""
-GOOGLE_API_KEY="your_google_api_key"
-GOOGLE_CSE_ID="your_google_custom_search_engine_id"
-DEEPSEEK_API_KEY="your_deepseek_api_key"
-DEEPSEEK_BASE_URL="https://api.deepseek.com"
-# TESSERACT_CMD is usually not needed if tesseract is installed via packages.txt
-# If you still encounter issues, you might explicitly set it to "/usr/bin/tesseract" for Linux
-# TESSERACT_CMD="/usr/bin/tesseract" 
-""")
 
 def chatbot_app():
     st.title("Financial Chatbot")
@@ -878,16 +872,6 @@ def chatbot_app():
         "This chatbot can fetch real-time and historical stock data, calculate investment returns, "
         "and browse the web for general financial information using DeepSeek AI and Google Search."
     )
-    st.sidebar.markdown("#### API Key Setup")
-    st.sidebar.markdown(
-        "Ensure you have a `.env` file in the same directory as this script with the following variables set, or configure them as Streamlit secrets:"
-    )
-    st.sidebar.code("""
-GOOGLE_API_KEY="your_google_api_key"
-GOOGLE_CSE_ID="your_google_custom_search_engine_id"
-DEEPSEEK_API_KEY="your_deepseek_api_key"
-DEEPSEEK_BASE_URL="https://api.deepseek.com"
-""")
 
 
 # --- Main Streamlit App Layout ---
