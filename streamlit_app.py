@@ -20,32 +20,27 @@ from dateutil.relativedelta import relativedelta
 from bs4 import BeautifulSoup
 from googleapiclient.discovery import build
 import pytz
-import time # Import time for rate limiting
+import time
 
-# Set up logging for Streamlit
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-load_dotenv()  # Load environment variables from .env file
+load_dotenv()
 
-# Initialize chat history in session state at the top level
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- Configure pytesseract ---
 try:
-    # Attempt to find tesseract in the system's PATH first
     tesseract_path = shutil.which("tesseract")
     if tesseract_path:
         pytesseract.pytesseract.tesseract_cmd = tesseract_path
         logging.info(f"Pytesseract command set to: {tesseract_path}")
     else:
-        # Fallback to a common Linux path if not found in PATH
         pytesseract.pytesseract.tesseract_cmd = os.getenv("TESSERACT_CMD", "/usr/bin/tesseract")
         logging.warning(
             f"Tesseract not found in system PATH. Attempting fallback to: {pytesseract.pytesseract.tesseract_cmd}")
 
-    # Verify if tesseract_cmd is set and tesseract is accessible
     if not pytesseract.pytesseract.tesseract_cmd:
         raise FileNotFoundError("Tesseract executable path not found or set.")
+
     pytesseract.get_tesseract_version()
 
 except pytesseract.TesseractNotFoundError:
@@ -69,24 +64,17 @@ except Exception as e:
     st.stop()
 
 
-# --- chart_extractor.py content (Enhanced for Maximum Data Points) ---
 def extract_price_curve(image):
-    """
-    Extracts a price curve and its real values from a chart image using computer vision and OCR.
-
-    This version is highly optimized for extracting a large number of data points
-    from a distinctively colored stock price line (like red/pink in WechatIMG204 2.jpg).
-    """
     if image is None:
         raise ValueError("Image object is None.")
 
     image_np = np.array(image)
     if image_np.ndim == 3 and image_np.shape[2] == 3:
         image_cv = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
-    elif image_np.ndim == 2:  # Grayscale image
-        image_cv = cv2.cvtColor(image_np, cv2.COLOR_GRAY2BGR)
+    elif image_np.ndim == 2:
+        image_cv = cv2.cvtColor(image_cv, cv2.COLOR_GRAY2BGR)
     else:
-        image_cv = image_np  # Assume already BGR or compatible
+        image_cv = image_np
 
     h, w, _ = image_cv.shape
 
@@ -142,10 +130,10 @@ def extract_price_curve(image):
 
     if not y_axis_labels:
         logging.error("No numeric Y-axis labels found via OCR on either side. Cannot determine price scale.")
-        min_price_val = 2.6  # Fallback to a range suitable for WechatIMG204 2.jpg
+        min_price_val = 2.6
         max_price_val = 3.8
-        min_price_pixel = h * 0.9  # Assume lowest pixel is 90% down
-        max_price_pixel = h * 0.1  # Assume highest pixel is 10% down
+        min_price_pixel = h * 0.9
+        max_price_pixel = h * 0.1
         logging.warning(f"Falling back to simulated range: {min_price_val}-{max_price_val} due to OCR failure.")
     else:
         y_axis_labels.sort(key=lambda x: x['y_pixel'])
@@ -156,7 +144,7 @@ def extract_price_curve(image):
 
         if min_price_pixel == max_price_pixel or min_price_val == max_price_val:
             logging.warning("Insufficient distinct Y-axis labels for precise scaling. Falling back to simulated range.")
-            min_price_val = 2.6  # Fallback to a range suitable for WechatIMG204 2.jpg
+            min_price_val = 2.6
             max_price_val = 3.8
             min_price_pixel = h * 0.9
             max_price_pixel = h * 0.1
@@ -164,14 +152,10 @@ def extract_price_curve(image):
     logging.info(
         f"OCR detected Y-axis ({selected_axis_side}): Min Price: {min_price_val} at Y-pixel {min_price_pixel}, Max Price: {max_price_val} at Y-pixel {max_price_pixel}")
 
-    # --- 2. Extract Price Line (Optimized for distinct color lines) ---
-
-    # Define a tighter ROI for the chart area to exclude grid lines and other noise
-    # These values are tuned for WechatIMG204 2.jpg. Adjust for other images.
-    chart_roi_x_start = int(w * 0.15)  # Start after left Y-axis labels
-    chart_roi_x_end = int(w * 0.85)  # End before right edge
-    chart_roi_y_start = int(h * 0.4)  # Start below top header/grid lines
-    chart_roi_y_end = int(h * 0.85)  # End above bottom time labels/grid lines
+    chart_roi_x_start = int(w * 0.15)
+    chart_roi_x_end = int(w * 0.85)
+    chart_roi_y_start = int(h * 0.4)
+    chart_roi_y_end = int(h * 0.85)
 
     chart_area = image_cv[chart_roi_y_start:chart_roi_y_end, chart_roi_x_start:chart_roi_x_end]
 
@@ -179,52 +163,46 @@ def extract_price_curve(image):
         logging.error("Chart ROI is empty. Check image dimensions or ROI coordinates.")
         raise ValueError("Chart ROI is empty, cannot perform line detection.")
 
-    # Convert to HSV color space for robust color detection
     hsv = cv2.cvtColor(chart_area, cv2.COLOR_BGR2HSV)
 
-    lower_line_color1 = np.array([0, 150, 100])  # Strong red
+    lower_line_color1 = np.array([0, 150, 100])
     upper_line_color1 = np.array([10, 255, 255])
 
-    lower_line_color2 = np.array([170, 150, 100])  # Other red range
+    lower_line_color2 = np.array([170, 150, 100])
     upper_line_color2 = np.array([179, 255, 255])
 
     mask1 = cv2.inRange(hsv, lower_line_color1, upper_line_color1)
     mask2 = cv2.inRange(hsv, lower_line_color2, upper_line_color2)
     line_mask = mask1 + mask2
 
+    # Define kernel here, before its first use
+    kernel = np.ones((2, 2), np.uint8)
     line_mask = cv2.morphologyEx(line_mask, cv2.MORPH_CLOSE, kernel, iterations=1)
     line_mask = cv2.morphologyEx(line_mask, cv2.MORPH_OPEN, kernel, iterations=1)
 
-    # Find contours on the cleaned mask
     contours, _ = cv2.findContours(line_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
-        # Fallback to general edge detection if color-based fails, but it's less precise for dense points
         logging.warning("No distinct colored line contours found. Falling back to general edge detection.")
         gray_chart_area = cv2.cvtColor(chart_area, cv2.COLOR_BGR2GRAY)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         contrast_enhanced = clahe.apply(gray_chart_area)
-        blurred_chart_area = cv2.GaussianBlur(contrast_enhanced, (3, 3), 0)  # Smaller blur for more detail
-        edges = cv2.Canny(blurred_chart_area, 20, 80)  # Lower thresholds for more edges
+        blurred_chart_area = cv2.GaussianBlur(contrast_enhanced, (3, 3), 0)
+        edges = cv2.Canny(blurred_chart_area, 20, 80)
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if not contours:
             raise ValueError("No contours found in the chart area after color and fallback edge detection.")
 
     all_line_points = []
-    # Collect all points from all significant contours
     for contour in contours:
-        # Filter out very small noise contours, but keep enough detail
-        if cv2.contourArea(contour) > 1:  # Very low threshold to capture almost all line pixels
+        if cv2.contourArea(contour) > 1:
             for pt in contour:
-                # Adjust points to original image coordinates by adding ROI offsets
                 all_line_points.append((pt[0][0] + chart_roi_x_start, pt[0][1] + chart_roi_y_start))
 
     if not all_line_points:
-        raise ValueError("No valid points extracted from any significant contour.")
+        raise ValueError("No valid points extracted from the main line after cleaning.")
 
-    # Sort points by the x-coordinate and aggregate, taking the median y for robustness
-    # This ensures a single, representative Y-value for each X-pixel, maximizing density.
     points_by_x = {}
     for x, y in all_line_points:
         if x not in points_by_x:
@@ -242,7 +220,6 @@ def extract_price_curve(image):
     x_pixel_vals = [p[0] for p in cleaned_points]
     y_pixel_vals = [p[1] for p in cleaned_points]
 
-    # --- 3. Map Pixel Y-values to Real Price Values (unchanged) ---
     y_vals_real = np.interp(y_pixel_vals,
                             (max_price_pixel, min_price_pixel),
                             (max_price_val, min_price_val)
@@ -253,7 +230,6 @@ def extract_price_curve(image):
     return x_vals, y_vals_real
 
 
-# --- prediction.py content (unchanged, num_future already increased) ---
 def predict_future_prices(x, y, num_future=50):
     slope, intercept = np.polyfit(x, y, deg=1)
     last_x = x[-1]
@@ -282,7 +258,6 @@ def adjust_prediction_with_news(y_values, news_items):
     return [price * (1 + adjustment_percentage) for price in y_values]
 
 
-# --- news_service.py content (unchanged) ---
 def search_news(query, api_key, cse_id, num_results=5):
     url = "https://www.googleapis.com/customsearch/v1"
     params = {"q": f"{query} stock financial news OR earnings OR analyst ratings OR market outlook", "cx": cse_id,
@@ -344,19 +319,14 @@ def analyze_news(news_links, api_key, base_url):
         return {"overall_summary": f"An error occurred during AI analysis: {e}", "news_items": []}
 
 
-# --- main.py content (adapted for Streamlit) ---
 def run_analysis_streamlit(uploaded_file, ticker):
-    """
-    Runs the full stock analysis workflow for Streamlit.
-    """
     st.info(f"🔎 Starting full analysis for {ticker} using the uploaded image.")
 
-    # --- 1. Load API Keys ---
     google_api_key = os.getenv("GOOGLE_API_KEY")
     google_cse_id = os.getenv("GOOGLE_CSE_ID")
     deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
     deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
-    alpha_vantage_api_key = os.getenv("ALPHA_VANTAGE_API_KEY") # New API key
+    alpha_vantage_api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
 
     if not all([google_api_key, google_cse_id, deepseek_api_key, deepseek_base_url, alpha_vantage_api_key]):
         st.error(
@@ -372,11 +342,9 @@ def run_analysis_streamlit(uploaded_file, ticker):
         """)
         return
 
-    # Convert uploaded file to PIL Image
     image = Image.open(uploaded_file)
     st.image(image, caption="Uploaded Stock Chart", use_column_width=True)
 
-    # --- 2. Extract Historical Data from Image ---
     with st.spinner("Extracting historical data from image..."):
         try:
             x_hist, y_hist = extract_price_curve(image)
@@ -385,12 +353,10 @@ def run_analysis_streamlit(uploaded_file, ticker):
             st.error(f"❌ Failed to extract data from image: {e}")
             return
 
-    # --- 3. Make Initial Price Prediction ---
     with st.spinner("Generating initial price prediction..."):
         x_future, y_future_raw = predict_future_prices(x_hist, y_hist, num_future=50)
         st.success("✅ Generated initial future price prediction.")
 
-    # --- 4. Get and Analyze News ---
     news_analysis = []
     overall_news_summary = "No news analysis performed."
     with st.spinner("Searching and analyzing news... This may take a while."):
@@ -422,17 +388,14 @@ def run_analysis_streamlit(uploaded_file, ticker):
         else:
             st.warning("Could not find any news articles. Prediction will not be adjusted by news.")
 
-    # --- 5. Adjust Prediction with News Sentiment ---
     with st.spinner("Adjusting prediction based on news sentiment..."):
         y_future_adjusted = adjust_prediction_with_news(y_future_raw, news_analysis)
         st.success("✅ Adjusted prediction based on news sentiment.")
 
-    # --- 6. Plot Results ---
     st.subheader("📈 Stock Price Prediction Plot")
     fig, ax = plt.subplots(figsize=(12, 7))
     ax.plot(x_hist, y_hist, 'o-', label="Historical (from Image)", color='royalblue')
 
-    # Connect historical to prediction
     last_hist_x, last_hist_y = x_hist[-1], y_hist[-1]
     first_future_x, first_future_y = x_future[0], y_future_adjusted[0]
 
@@ -457,16 +420,11 @@ def run_analysis_streamlit(uploaded_file, ticker):
     st.write(f"**Overall News Sentiment:** {overall_news_summary}")
 
 
-# === Financial Chatbot Functions ===
 def get_pacific_time():
     pacific = pytz.timezone('America/Los_Angeles')
     return datetime.now(pacific).strftime("%A, %B %d, %Y %I:%M %p %Z")
 
-# New tool function to get current Pacific time
 def getCurrentPacificTime():
-    """
-    Returns the current date and time in Pacific Time (America/Los_Angeles) as a formatted string.
-    """
     return get_pacific_time()
 
 
@@ -481,48 +439,38 @@ def google_search_chatbot(query, api_key, cse_id, **kwargs):
 
 
 def browse_page(url):
-    """
-    Improved function to browse a webpage and extract relevant text content.
-    It attempts to remove common non-content elements and extract text from a broader
-    set of content-bearing HTML tags.
-    """
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Remove common non-content tags that might contain irrelevant text or noise
         for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'form', 'button', 'img', 'svg', 'aside', 'noscript', 'meta', 'link', 'input', 'select', 'textarea']):
             tag.decompose()
+
         main_content_tags = soup.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'article', 'section', 'main', 'div', 'span'])
         
-        # Filter out empty strings and join
         texts = [tag.get_text(strip=True) for tag in main_content_tags if tag.get_text(strip=True)]
 
         content = ' '.join(texts)
-        # Clean up multiple spaces and newlines
         cleaned_content = re.sub(r'\s+', ' ', content).strip()
 
-        # Limit content length to avoid excessive token usage for the LLM
-        # A slightly larger limit might capture more context, adjust as needed based on LLM capabilities
-        return cleaned_content[:4000] # Kept at 4000 characters for consistency with previous behavior
+        return cleaned_content[:4000]
     except requests.RequestException as e:
         print(f"❌ Browsing error: {e}")
         return None
 
 
-def GoogleSearchAndBrowse(query, num_results=3): # Added num_results parameter
+def GoogleSearchAndBrowse(query, num_results=3):
     google_api_key = os.getenv("GOOGLE_API_KEY")
     google_cse_id = os.getenv("GOOGLE_CSE_ID")
     if not google_api_key or not google_cse_id:
         return "Error: Google API keys not configured for browsing."
 
-    # Include Pacific time in the search query
     current_time_pacific = get_pacific_time()
     query_with_time = f"{query} as of {current_time_pacific}"
 
-    results = google_search_chatbot(query_with_time, google_api_key, google_cse_id, num=num_results) # Use num_results
+    results = google_search_chatbot(query_with_time, google_api_key, google_cse_id, num=num_results)
     if not results:
         return f"🕸️ No Google search results found for query: '{query_with_time}'."
 
@@ -542,10 +490,6 @@ def GoogleSearchAndBrowse(query, num_results=3): # Added num_results parameter
     return f"Search Results for '{query_with_time}':\n" + "\n\n".join(all_content)
 
 def getRealtimeStockData_AlphaVantage(ticker: str, api_key: str):
-    """
-    Fetches real-time stock data from Alpha Vantage.
-    Note: Free Alpha Vantage API has a rate limit of 5 calls per minute.
-    """
     url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={api_key}"
     try:
         response = requests.get(url, timeout=10)
@@ -561,7 +505,6 @@ def getRealtimeStockData_AlphaVantage(ticker: str, api_key: str):
             volume = int(quote.get("06. volume"))
             latest_trading_day = quote.get("07. latest trading day")
             
-            # Alpha Vantage does not provide exact real-time timestamp, using latest trading day
             time_str = f"End of Day {latest_trading_day}" if latest_trading_day else "N/A"
 
             return {
@@ -593,33 +536,24 @@ def getRealtimeStockData_AlphaVantage(ticker: str, api_key: str):
         return {"error": f"An unexpected error occurred with Alpha Vantage: {e}"}
 
 def _scrape_price_from_url(url: str, selector: str, ticker: str, source_name: str):
-    """
-    Attempts to scrape a stock price from a specific URL using BeautifulSoup and a CSS selector.
-    Returns a dictionary with price and source, or None if unsuccessful.
-    """
     try:
         headers = {'User-Agent': 'Mozilla/50 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Find the element using the provided CSS selector
         price_element = soup.select_one(selector)
         
         if price_element:
             price_text = price_element.get_text(strip=True)
-            # Clean the price text (remove currency symbols, commas, etc.)
             cleaned_price_str = re.sub(r'[^\d.,]', '', price_text)
-            # Handle comma as decimal separator (European format) if present
             if ',' in cleaned_price_str and '.' in cleaned_price_str:
-                # If comma is the last separator, assume European decimal
                 if cleaned_price_str.rfind(',') > cleaned_price_str.rfind('.'):
                     cleaned_price_str = cleaned_price_str.replace('.', '').replace(',', '.')
-                else: # Assume US thousands separator
+                else:
                     cleaned_price_str = cleaned_price_str.replace(',', '')
             
-            # Ensure proper decimal point
-            cleaned_price_str = cleaned_price_str.replace(',', '') # Remove all commas first
+            cleaned_price_str = cleaned_price_str.replace(',', '')
             price = float(cleaned_price_str)
             return {"price": price, "source": source_name}
         return None
@@ -631,22 +565,15 @@ def _scrape_price_from_url(url: str, selector: str, ticker: str, source_name: st
         return None
 
 def getRealtimeStockData(ticker: str):
-    """
-    Fetches real-time stock data for a given ticker from multiple sources.
-    Prioritizes Alpha Vantage if API key is available, then falls back to scraping.
-    """
     alpha_vantage_api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
     if alpha_vantage_api_key:
-        # Removed st.info for tool output visibility
         data = getRealtimeStockData_AlphaVantage(ticker, alpha_vantage_api_key)
         if data and "error" not in data:
             return data
         elif data and "error" in data:
-            # Removed st.warning for tool output visibility
-            pass # Keep silent for the user, but log for debugging
+            pass
         else:
-            # Removed st.warning for tool output visibility
-            pass # Keep silent for the user, but log for debugging
+            pass
 
     sources = [
         {"url": f"https://finance.yahoo.com/quote/{ticker}/", "selector": f"fin-qsp-price[data-symbol='{ticker}']", "name": "Yahoo Finance"},
@@ -659,29 +586,23 @@ def getRealtimeStockData(ticker: str):
         if price_data:
             return {
                 "price": price_data["price"],
-                "open": "N/A", # Scraped data often doesn't have this detail
+                "open": "N/A",
                 "high": "N/A",
                 "low": "N/A",
                 "volume": "N/A",
-                "time_str": get_pacific_time(), # Use current time as a proxy
+                "time_str": get_pacific_time(),
                 "source": price_data["source"]
             }
     return {"error": f"Could not retrieve real-time data for {ticker} from any source."}
 
 
 def getHistoricalStockData(ticker: str, period: str = "1y"):
-    """
-    Fetches historical stock data using yfinance.
-    Period options: "1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"
-    """
-    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         hist = stock.history(period=period)
         if hist.empty:
             return f"No historical data found for {ticker} for the period {period}."
         
-        # Format for display
         hist.index = hist.index.strftime('%Y-%m-%d')
         hist_df = hist[['Open', 'High', 'Low', 'Close', 'Volume']]
         hist_df.columns = [f'{ticker} Open', f'{ticker} High', f'{ticker} Low', f'{ticker} Close', f'{ticker} Volume']
@@ -691,10 +612,6 @@ def getHistoricalStockData(ticker: str, period: str = "1y"):
         return f"Error fetching historical data for {ticker}: {e}"
 
 def getCompanyInfo(ticker: str):
-    """
-    Fetches company information using yfinance.
-    """
-    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
@@ -702,7 +619,6 @@ def getCompanyInfo(ticker: str):
         if not info:
             return f"No company information found for {ticker}."
         
-        # Extract key information
         company_summary = {
             "Symbol": info.get("symbol"),
             "Long Name": info.get("longName"),
@@ -717,7 +633,6 @@ def getCompanyInfo(ticker: str):
             "Business Summary": info.get("longBusinessSummary", "No business summary available.")
         }
         
-        # Convert relevant numerical values to readable format
         if company_summary.get("Market Cap"):
             company_summary["Market Cap"] = f"${company_summary['Market Cap']:,}"
         if company_summary.get("Full Time Employees"):
@@ -725,7 +640,6 @@ def getCompanyInfo(ticker: str):
         if company_summary.get("Current Price"):
             company_summary["Current Price"] = f"${company_summary['Current Price']:.2f}"
 
-        # Format as a readable string
         info_str = f"**Company Information for {company_summary.get('Long Name', ticker)} ({company_summary.get('Symbol', '')}):**\n"
         for key, value in company_summary.items():
             if key not in ["Symbol", "Long Name", "Business Summary"]:
@@ -737,12 +651,6 @@ def getCompanyInfo(ticker: str):
         return f"Error fetching company information for {ticker}: {e}"
 
 def getFinancialStatements(ticker: str, statement_type: str = "income_statement", period: str = "annual"):
-    """
-    Fetches financial statements (income statement, balance sheet, cash flow) for a given ticker.
-    statement_type: "income_statement", "balance_sheet", "cash_flow"
-    period: "annual", "quarterly"
-    """
-    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         
@@ -758,7 +666,6 @@ def getFinancialStatements(ticker: str, statement_type: str = "income_statement"
         if data.empty:
             return f"No {period} {statement_type} data found for {ticker}."
         
-        # Transpose for better readability in markdown
         data = data.T
         data.index.name = "Date"
         data.index = data.index.strftime('%Y-%m-%d')
@@ -768,10 +675,6 @@ def getFinancialStatements(ticker: str, statement_type: str = "income_statement"
         return f"Error fetching financial statements for {ticker}: {e}"
 
 def getMajorHolders(ticker: str):
-    """
-    Fetches major holders information for a given ticker.
-    """
-    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         major_holders = stock.major_holders
@@ -786,10 +689,6 @@ def getMajorHolders(ticker: str):
         return f"Error fetching major holders for {ticker}: {e}"
 
 def getInstitutionalHolders(ticker: str):
-    """
-    Fetches institutional holders information for a given ticker.
-    """
-    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         institutional_holders = stock.institutional_holders
@@ -804,10 +703,6 @@ def getInstitutionalHolders(ticker: str):
         return f"Error fetching institutional holders for {ticker}: {e}"
 
 def getRecommendations(ticker: str):
-    """
-    Fetches analyst recommendations for a given ticker.
-    """
-    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         recommendations = stock.recommendations
@@ -815,17 +710,12 @@ def getRecommendations(ticker: str):
         if recommendations.empty:
             return f"No analyst recommendations found for {ticker}."
         
-        # Limit to the most recent recommendations for brevity
         recommendations_str = f"**Analyst Recommendations for {ticker}:**\n" + recommendations.head(10).to_markdown()
         return recommendations_str
     except Exception as e:
         return f"Error fetching analyst recommendations for {ticker}: {e}"
 
 def getDividends(ticker: str):
-    """
-    Fetches dividend history for a given ticker.
-    """
-    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         dividends = stock.dividends
@@ -843,10 +733,6 @@ def getDividends(ticker: str):
         return f"Error fetching dividend history for {ticker}: {e}"
 
 def getEarnings(ticker: str):
-    """
-    Fetches earnings history (annual and quarterly) for a given ticker.
-    """
-    # Removed st.info for tool output visibility
     try:
         stock = yf.Ticker(ticker)
         
@@ -875,10 +761,6 @@ def getEarnings(ticker: str):
         return f"Error fetching earnings data for {ticker}: {e}"
 
 def getNews(ticker: str, num_articles: int = 5):
-    """
-    Fetches recent news articles for a given ticker using Google Search.
-    """
-    # Removed st.info for tool output visibility
     query = f"{ticker} stock news"
     news_links = search_news(query, os.getenv("GOOGLE_API_KEY"), os.getenv("GOOGLE_CSE_ID"), num_results=num_articles)
     
@@ -899,7 +781,6 @@ if not deepseek_api_key or not deepseek_base_url:
 
 client = openai.OpenAI(api_key=deepseek_api_key, base_url=deepseek_base_url)
 
-# Define the tools available to the model
 tools = [
     {
         "type": "function",
@@ -1120,13 +1001,12 @@ tools = [
             "description": "Get the current date and time in Pacific Time (America/Los_Angeles).",
             "parameters": {
                 "type": "object",
-                "properties": {} # No parameters needed for this function
+                "properties": {}
             }
         }
     }
 ]
 
-# Map tool names to their actual functions
 available_tools = {
     "getRealtimeStockData": getRealtimeStockData,
     "getHistoricalStockData": getHistoricalStockData,
@@ -1139,14 +1019,11 @@ available_tools = {
     "getEarnings": getEarnings,
     "getNews": getNews,
     "GoogleSearchAndBrowse": GoogleSearchAndBrowse,
-    "getCurrentPacificTime": getCurrentPacificTime # Add the new tool here
+    "getCurrentPacificTime": getCurrentPacificTime
 }
 
 def run_conversation(messages):
-    """
-    Manages the conversation with the LLM, including tool calling.
-    """
-    time.sleep(1) # Sleep for 1 second between API calls to avoid hitting rate limits
+    time.sleep(1)
 
     try:
         response = client.chat.completions.create(
@@ -1239,14 +1116,18 @@ def run_conversation(messages):
                 "role": response_message.role,
                 "content": response_message.content or ""
             }
+
     except openai.APIError as e:
         st.error(f"DeepSeek API Error: {e}")
         return {"role": "assistant", "content": f"An API error occurred: {e}"}
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
         return {"role": "assistant", "content": f"An unexpected error occurred: {e}"}
+
+
 st.set_page_config(page_title="Ask Your Financial Questions", page_icon="📈")
 st.title("Financial Analysis App")
+
 tab1, tab2 = st.tabs(["Stock Chart Image Predictor", "Financial Chatbot"])
 
 with tab1:
@@ -1264,7 +1145,9 @@ with tab1:
 with tab2:
     st.header("Financial Chatbot")
     st.write("Hello! I'm your financial chatbot. How can I assist you today? You can ask me about real-time stock data, historical data, company information, financial statements, major holders, institutional holders, recommendations, dividends, earnings, or recent news for any stock.")
+
     chat_container = st.container()
+
     with chat_container:
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
@@ -1282,19 +1165,19 @@ with tab2:
             bottom: 0;
             left: 0;
             width: 100%;
-            background-color: white; /* Or your app's background color */
+            background-color: white;
             padding: 10px 0;
             box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
             z-index: 1000;
         }
-        /* Adjust padding for the content to not be hidden by the fixed input */
         .block-container {
-            padding-bottom: 70px; /* Adjust based on the height of your input bar */
+            padding-bottom: 70px;
         }
         </style>
         """,
         unsafe_allow_html=True
     )
+
     with st.container():
         st.markdown('<div class="fixed-bottom-input">', unsafe_allow_html=True)
         prompt = st.chat_input("What's on your mind?", key="chat_input")
@@ -1308,6 +1191,7 @@ with tab2:
 
         with st.spinner("Thinking..."):
             response = run_conversation(st.session_state.messages)
+            
             with chat_container:
                 with st.chat_message("assistant"):
                     st.markdown(response["content"])
