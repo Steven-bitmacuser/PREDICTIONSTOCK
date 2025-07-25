@@ -46,8 +46,6 @@ try:
     # Verify if tesseract_cmd is set and tesseract is accessible
     if not pytesseract.pytesseract.tesseract_cmd:
         raise FileNotFoundError("Tesseract executable path not found or set.")
-
-    # Optional: Verify Tesseract version to ensure it's callable
     pytesseract.get_tesseract_version()
 
 except pytesseract.TesseractNotFoundError:
@@ -82,9 +80,7 @@ def extract_price_curve(image):
     if image is None:
         raise ValueError("Image object is None.")
 
-    # Convert PIL Image to OpenCV format
     image_np = np.array(image)
-    # For some images, RGB to BGR conversion might be needed
     if image_np.ndim == 3 and image_np.shape[2] == 3:
         image_cv = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
     elif image_np.ndim == 2:  # Grayscale image
@@ -94,7 +90,6 @@ def extract_price_curve(image):
 
     h, w, _ = image_cv.shape
 
-    # --- 1. OCR for Y-Axis Labels (Universal Detection - unchanged) ---
     left_y_axis_roi_x_start = 0
     left_y_axis_roi_x_end = int(w * 0.25)
     right_y_axis_roi_x_start = int(w * 0.75)
@@ -187,11 +182,6 @@ def extract_price_curve(image):
     # Convert to HSV color space for robust color detection
     hsv = cv2.cvtColor(chart_area, cv2.COLOR_BGR2HSV)
 
-    # Define a more precise range for the distinct red/pink line in WechatIMG204 2.jpg
-    # These values were found by sampling the line color in the image.
-    # Hue (H): 0-179 (red is around 0 and 170-180)
-    # Saturation (S): 0-255 (how vibrant the color is)
-    # Value (V): 0-255 (how bright the color is)
     lower_line_color1 = np.array([0, 150, 100])  # Strong red
     upper_line_color1 = np.array([10, 255, 255])
 
@@ -202,9 +192,6 @@ def extract_price_curve(image):
     mask2 = cv2.inRange(hsv, lower_line_color2, upper_line_color2)
     line_mask = mask1 + mask2
 
-    # Morphological operations to clean the mask and make the line continuous
-    # Use a small kernel to connect tiny gaps without distorting the line shape too much
-    kernel = np.ones((2, 2), np.uint8)  # Smaller kernel for finer detail
     line_mask = cv2.morphologyEx(line_mask, cv2.MORPH_CLOSE, kernel, iterations=1)
     line_mask = cv2.morphologyEx(line_mask, cv2.MORPH_OPEN, kernel, iterations=1)
 
@@ -508,9 +495,6 @@ def browse_page(url):
         # Remove common non-content tags that might contain irrelevant text or noise
         for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'form', 'button', 'img', 'svg', 'aside', 'noscript', 'meta', 'link', 'input', 'select', 'textarea']):
             tag.decompose()
-
-        # Extract text from a comprehensive set of content-bearing HTML tags
-        # Prioritize tags that typically hold main article/body content
         main_content_tags = soup.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'article', 'section', 'main', 'div', 'span'])
         
         # Filter out empty strings and join
@@ -664,8 +648,6 @@ def getRealtimeStockData(ticker: str):
             # Removed st.warning for tool output visibility
             pass # Keep silent for the user, but log for debugging
 
-    # Removed st.info for tool output visibility
-    # Fallback to web scraping if Alpha Vantage fails or is not configured
     sources = [
         {"url": f"https://finance.yahoo.com/quote/{ticker}/", "selector": f"fin-qsp-price[data-symbol='{ticker}']", "name": "Yahoo Finance"},
         {"url": f"https://www.google.com/finance/quote/{ticker}:NASDAQ", "selector": "div[data-source='inline_price']", "name": "Google Finance"},
@@ -908,9 +890,6 @@ def getNews(ticker: str, num_articles: int = 5):
         news_str += f"{i+1}. {link}\n"
     return news_str
 
-# === DeepSeek API Integration ===
-# Configure the DeepSeek API client
-# Use environment variables for API key
 deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
 deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
 
@@ -918,8 +897,6 @@ if not deepseek_api_key or not deepseek_base_url:
     st.error("DEEPSEEK_API_KEY or DEEPSEEK_BASE_URL environment variables not set. Please set them in your `.env` file or Streamlit secrets.")
     st.stop()
 
-# Initialize the generative model
-# Use a specific model that supports tool calling (DeepSeek Chat)
 client = openai.OpenAI(api_key=deepseek_api_key, base_url=deepseek_base_url)
 
 # Define the tools available to the model
@@ -1169,7 +1146,6 @@ def run_conversation(messages):
     """
     Manages the conversation with the LLM, including tool calling.
     """
-    # Add a safety mechanism for rate limiting API calls
     time.sleep(1) # Sleep for 1 second between API calls to avoid hitting rate limits
 
     try:
@@ -1263,20 +1239,14 @@ def run_conversation(messages):
                 "role": response_message.role,
                 "content": response_message.content or ""
             }
-
     except openai.APIError as e:
         st.error(f"DeepSeek API Error: {e}")
         return {"role": "assistant", "content": f"An API error occurred: {e}"}
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
         return {"role": "assistant", "content": f"An unexpected error occurred: {e}"}
-
-
-# --- Streamlit UI ---
 st.set_page_config(page_title="Ask Your Financial Questions", page_icon="📈")
 st.title("Financial Analysis App")
-
-# Create tabs for the two functionalities
 tab1, tab2 = st.tabs(["Stock Chart Image Predictor", "Financial Chatbot"])
 
 with tab1:
@@ -1294,23 +1264,12 @@ with tab1:
 with tab2:
     st.header("Financial Chatbot")
     st.write("Hello! I'm your financial chatbot. How can I assist you today? You can ask me about real-time stock data, historical data, company information, financial statements, major holders, institutional holders, recommendations, dividends, earnings, or recent news for any stock.")
-
-    # Container for chat messages, allowing it to scroll independently
     chat_container = st.container()
-
-    # Display chat messages from history on app rerun
     with chat_container:
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
-    # Input box at the bottom.
-    # To make it always at the bottom and behave like a sidebar input,
-    # we use a combination of `st.container` and CSS injection.
-    # This approach ensures the input field is fixed at the bottom
-    # while the chat history scrolls.
-
-    # Inject custom CSS for fixed input bar at the bottom
     st.markdown(
         """
         <style>
@@ -1336,29 +1295,20 @@ with tab2:
         """,
         unsafe_allow_html=True
     )
-
-    # Create a container for the input box at the bottom
     with st.container():
-        # Apply custom CSS class for fixed positioning
         st.markdown('<div class="fixed-bottom-input">', unsafe_allow_html=True)
         prompt = st.chat_input("What's on your mind?", key="chat_input")
         st.markdown('</div>', unsafe_allow_html=True)
 
 
     if prompt:
-        # Display user message in chat message container
         with chat_container:
             st.chat_message("user").markdown(prompt)
-        # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
 
         with st.spinner("Thinking..."):
-            # Get assistant response
             response = run_conversation(st.session_state.messages)
-            
-            # Display assistant response in chat message container
             with chat_container:
                 with st.chat_message("assistant"):
                     st.markdown(response["content"])
-            # Add assistant response to chat history
             st.session_state.messages.append({"role": response["role"], "content": response["content"]})
